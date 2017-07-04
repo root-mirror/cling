@@ -14,6 +14,14 @@
 #include "llvm/Support/Compiler.h"
 #include <string>
 
+#ifdef LLVM_ON_WIN32
+#include <array>
+#endif
+
+namespace llvm {
+  class raw_ostream;
+}
+
 namespace cling {
 namespace utils {
 namespace platform {
@@ -91,11 +99,21 @@ inline namespace osx {
   /// \param [out] SysRoot - The path to the SDK
   /// \param [in] Verbose - Log progress
   ///
-  bool GetISysRoot(std::string& SysRoot, bool Verbose = false);
+  struct MacOSSDK {
+    llvm::raw_ostream* Verbose;
+    MacOSSDK(const char[1], llvm::raw_ostream* V = nullptr) : Verbose(V) {}
+    bool getISysRoot(std::string& SysRoot);
+  };
 
 } // namespace osx
+using SDK = MacOSSDK;
 
-#endif // __APPLE__
+#else  // __linux__
+
+struct EmptySDK { EmptySDK(const char[1], llvm::raw_ostream* = nullptr) {} };
+using SDK = EmptySDK;
+
+#endif // __linux__
 
 #elif defined(LLVM_ON_WIN32)
 
@@ -131,27 +149,57 @@ inline namespace windows {
   /// \param [in] Key - Key to lookup
   /// \param [in] ValueName - Value to lookup
   /// \param [out] Value - The value of the given key-value pair
+  /// \param [out] VersKey - The value that $VERSION is equal to for Value.
   ///
   /// \returns true if key-value existed and was read into Value
   ///
   bool GetSystemRegistryString(const char* Key, const char* ValueName,
-                               std::string& Value);
+                               std::string& Value, std::string* VersKey = 0);
 
-  ///\brief Get a path to an installed VisualStudio directory matching:
+  ///\brief Get paths to installed VisualStudio directory matching:
   ///  1. Version that cling was compiled
   ///  2. Version that shell is initialized to
   ///  3. Highest installed version
-  ///
-  /// \param [out] Path - Path to VisualStudio
-  /// \param [out] WindSDK - Store the path to the Windows SDK here
-  /// \param [in/out] UniversalSDK - Universal SDK version to match, or empty to
-  /// match the highest version. On ouput the path to the Universal SDK.
-  /// \param [in] Verbose - Log progress
-  ///
-  bool GetVisualStudioDirs(std::string& Path,
-                           std::string* WindSDK = nullptr,
-                           std::string* UniversalSDK = nullptr,
-                           bool Verbose = false);
+  class WindowsSDK {
+    enum { kNumEnvVarsIn = 5, kNumSavedEnvVars = 6 };
+    typedef std::array<const char* const, kNumEnvVarsIn> EnvBlock;
+
+    // Cached environment variables that may be temporarily overwritten.
+    std::array<std::string*, kNumSavedEnvVars> m_Env = {};
+
+    // Whether the environment variables need to be rest
+    bool m_Reset;
+
+  public:
+    ///\brief SDK version major 7, 8, 10
+    ///
+    uint16_t Major; // Should be uint8_t, but MSVC doesn't support %hhu!
+
+    ///\brief SDK root directory.
+    ///
+    std::string Root;
+
+    ///\brief StdLib include directories (#include <stdio.h>)
+    ///
+    llvm::SmallVector<std::string, 2> StdInclude;
+
+    ///\brief Windows include directories (#include <Windows.h>)
+    ///
+    llvm::SmallVector<std::string, 3> SdkIncludes;
+
+    ///\brief Whether the environment variables are correct for clang to setup
+    /// include directories properly.
+    ///
+    bool UsingEnv() const { return StdInclude.empty() && SdkIncludes.empty(); }
+
+    ///\brief Get the Windows SDK directories. On failure Major will be 0.
+    ///
+    ///\param [in] Env - The CLING_VStudioEnv block.
+    ///\param [in] Verbose - Log information to this stream.
+    ///
+    WindowsSDK(EnvBlock Env, llvm::raw_ostream* Verbose = nullptr);
+    ~WindowsSDK();
+  };
 
   ///\brief Runtime override for _CxxThrowException in Interpreter.
   //
@@ -163,6 +211,7 @@ inline namespace windows {
   void DeRegisterEHFrames(uint8_t* Addr, size_t Size);
 
 } // namespace windows
+using SDK = WindowsSDK;
 #endif // LLVM_ON_WIN32
 
 } // namespace platform

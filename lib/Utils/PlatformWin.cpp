@@ -11,6 +11,7 @@
 
 #if defined(LLVM_ON_WIN32)
 
+#include "Windows/MSVCSetupApi.h"
 #include "cling/Utils/Output.h"
 
 #include "llvm/ADT/SmallString.h"
@@ -132,124 +133,10 @@ static bool readFullStringValue(HKEY hkey, const char *valueName,
   return false;
 }
 
-static void logSearch(const char* Name, const std::string& Value,
-                      const char* Found = nullptr) {
-  if (Found)
-    cling::errs() << "Found " << Name << " '" << Value << "' that matches "
-                  << Found << " version\n";
-  else
-    cling::errs() << Name << " '" << Value << "' not found.\n";
-}
-
-static void trimString(const char* Value, const char* Sub, std::string& Out) {
-  const char* End = ::strstr(Value, Sub);
-  Out = End ? std::string(Value, End) : Value;
-}
-
-static bool getVSRegistryString(const char* Product, int VSVersion,
-                                std::string& Path, const char* Verbose) {
-  std::ostringstream Key;
-  Key << "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\" << Product << "\\"
-      << VSVersion << ".0";
-
-  std::string IDEInstallDir;
-  if (!GetSystemRegistryString(Key.str().c_str(), "InstallDir", IDEInstallDir)
-      || IDEInstallDir.empty()) {
-    if (Verbose)
-      logSearch("Registry", Key.str());
-    return false;
-  }
-
-  trimString(IDEInstallDir.c_str(), "\\Common7\\IDE", Path);
-  if (Verbose)
-    logSearch("Registry", Key.str(), Verbose);
-  return true;
-}
-
-static bool getVSEnvironmentString(int VSVersion, std::string& Path,
-                                   const char* Verbose) {
-  std::ostringstream Key;
-  Key << "VS" << VSVersion * 10 << "COMNTOOLS";
-  const char* Tools = ::getenv(Key.str().c_str());
-  if (!Tools) {
-    if (Verbose)
-      logSearch("Environment", Key.str());
-    return false;
-  }
-
-  trimString(Tools, "\\Common7\\Tools", Path);
-  if (Verbose)
-    logSearch("Environment", Key.str(), Verbose);
-  return true;
-}
-
-static bool getVisualStudioVer(int VSVersion, std::string& Path,
-                               const char* Verbose) {
-  if (getVSRegistryString("VisualStudio", VSVersion, Path, Verbose))
-    return true;
-
-  if (getVSRegistryString("VCExpress", VSVersion, Path, Verbose))
-    return true;
-
-  if (getVSEnvironmentString(VSVersion, Path, Verbose))
-    return true;
-
-  return false;
-}
-
-// Find the most recent version of Universal CRT or Windows 10 SDK.
-// vcvarsqueryregistry.bat from Visual Studio 2015 sorts entries in the include
-// directory by name and uses the last one of the list.
-// So we compare entry names lexicographically to find the greatest one.
-static bool getWindows10SDKVersion(std::string& SDKPath,
-                                   std::string& SDKVersion) {
-  // Save input SDKVersion to match, and clear SDKVersion for > comparsion
-  std::string UcrtCompiledVers;
-  UcrtCompiledVers.swap(SDKVersion);
-
-  std::error_code EC;
-  llvm::SmallString<MAX_PATHC> IncludePath(SDKPath);
-  llvm::sys::path::append(IncludePath, "Include");
-  for (llvm::sys::fs::directory_iterator DirIt(IncludePath, EC), DirEnd;
-       DirIt != DirEnd && !EC; DirIt.increment(EC)) {
-    if (!llvm::sys::fs::is_directory(DirIt->path()))
-      continue;
-    llvm::StringRef Candidate = llvm::sys::path::filename(DirIt->path());
-    // There could be subfolders like "wdf" in the "Include" directory, so only
-    // test names that start with "10." or match input.
-    const bool Match = Candidate == UcrtCompiledVers;
-    if (Match || (Candidate.startswith("10.") && Candidate > SDKVersion)) {
-      SDKPath = DirIt->path();
-      Candidate.str().swap(SDKVersion);
-      if (Match)
-        return true;
-    }
-  }
-  return !SDKVersion.empty();
-}
-
-static bool getUniversalCRTSdkDir(std::string& Path,
-                                  std::string& UCRTVersion) {
-  // vcvarsqueryregistry.bat for Visual Studio 2015 queries the registry
-  // for the specific key "KitsRoot10". So do we.
-  if (!GetSystemRegistryString("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\"
-                               "Windows Kits\\Installed Roots", "KitsRoot10",
-                               Path))
-    return false;
-
-  return getWindows10SDKVersion(Path, UCRTVersion);
-}
-
-bool getWindowsSDKDir(std::string& WindowsSDK) {
-  return GetSystemRegistryString("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\"
-                                 "Microsoft SDKs\\Windows\\$VERSION",
-                                 "InstallationFolder", WindowsSDK);
-}
-
 } // anonymous namespace
 
 bool GetSystemRegistryString(const char *keyPath, const char *valueName,
-                             std::string& outValue) {
+                             std::string& outValue, std::string* phValue) {
   HKEY hRootKey = NULL;
   const char* subKey = NULL;
 
@@ -334,6 +221,8 @@ bool GetSystemRegistryString(const char *keyPath, const char *valueName,
             if (readFullStringValue(hKey, valueName, outValue)) {
               // bestIndex = (int)index;
               bestValue = dvalue;
+              if (phValue)
+                *phValue = bestName;
               returnValue = true;
             }
             ::RegCloseKey(hKey);
@@ -354,94 +243,14 @@ bool GetSystemRegistryString(const char *keyPath, const char *valueName,
                               &hKey);
     if (lResult == ERROR_SUCCESS) {
       returnValue = readFullStringValue(hKey, valueName, outValue);
+      if (phValue)
+        phValue->clear();
       ::RegCloseKey(hKey);
     } else
       ReportError(lResult, "RegOpenKeyEx");
   }
   return returnValue;
 }
-
-static int GetVisualStudioVersionCompiledWith() {
-#if (_MSC_VER < 1900)
-  return (_MSC_VER / 100) - 6;
-#elif (_MSC_VER < 1910)
-  return 14;
-#else
-  #error "Unsupported/Untested _MSC_VER"
-  // As of now this is what is should be...have fun!
-  return 15;
-#endif
-}
-
-static void fixupPath(std::string& Path, const char* Append = nullptr) {
-  const char kSep = '\\';
-  if (Append) {
-    if (Path.empty())
-      return;
-    if (Path.back() != kSep)
-      Path.append(1, kSep);
-    Path.append(Append);
-  }
-  else {
-    while (!Path.empty() && Path.back() == kSep)
-      Path.pop_back();
-  }
-}
-
-bool GetVisualStudioDirs(std::string& Path, std::string* WinSDK,
-                         std::string* UniversalSDK, bool Verbose) {
-
-  if (WinSDK) {
-    if (!getWindowsSDKDir(*WinSDK)) {
-      WinSDK->clear();
-      if (Verbose)
-        cling::errs() << "Could not get Windows SDK path\n";
-    } else
-      fixupPath(*WinSDK);
-  }
-
-  if (UniversalSDK) {
-    // On input UniversalSDK is the best version to match
-    std::string UCRTVersion;
-    UniversalSDK->swap(UCRTVersion);
-    if (!getUniversalCRTSdkDir(*UniversalSDK, UCRTVersion)) {
-      UniversalSDK->clear();
-      if (Verbose)
-        cling::errs() << "Could not get Universal SDK path\n";
-    } else
-      fixupPath(*UniversalSDK, "ucrt");
-  }
-
-  const char* Msg = Verbose ? "compiled" : nullptr;
-
-  // Try for the version compiled with first
-  const int VSVersion = GetVisualStudioVersionCompiledWith();
-  if (getVisualStudioVer(VSVersion, Path, Msg)) {
-    fixupPath(Path);
-    return true;
-  }
-
-  // Check the environment variables that vsvars32.bat sets.
-  // We don't do this first so we can run from other VSStudio shells properly
-  if (const char* VCInstall = ::getenv("VCINSTALLDIR")) {
-    trimString(VCInstall, "\\VC", Path);
-    if (Verbose)
-      cling::errs() << "Using VCINSTALLDIR '" << VCInstall << "'\n";
-    return true;
-  }
-
-  // Try for any other version we can get
-  Msg = Verbose ? "highest" : nullptr;
-  const int Versions[] = { 14, 12, 11, 10, 9, 8, 0 };
-  for (unsigned i = 0; Versions[i]; ++i) {
-    if (Versions[i] != VSVersion && getVisualStudioVer(Versions[i], Path, Msg)) {
-      fixupPath(Path);
-      return true;
-    }
-  }
-  return false;
-}
-
 
 bool IsDLL(const std::string& Path) {
   bool isDLL = false;

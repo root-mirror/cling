@@ -86,10 +86,15 @@ namespace {
     container_t m_Saved;
 
   public:
-    
-    void addArgument(const char* arg, std::string value = std::string()) {
-      m_Saved.push_back(std::make_pair(arg,std::move(value)));
+    // First argument is string-pooled, must be constant data.
+    void addArgument(const char* Arg, std::string Value = std::string()) {
+      m_Saved.emplace_back(Arg, std::move(Value));
     }
+    void addHeaderSearch(std::string Value) {
+      addArgument("-I", std::move(Value));
+    }
+    void addArgument(std::string Value) { addArgument("", std::move(Value)); }
+
     container_t::const_iterator begin() const { return m_Saved.begin(); }
     container_t::const_iterator end() const { return m_Saved.end(); }
     bool empty() const { return m_Saved.empty(); }
@@ -123,7 +128,7 @@ namespace {
               cling::utils::LogNonExistantDirectory(Path);
           }
           else
-            Args.addArgument("-I", Path.str());
+            Args.addHeaderSearch(Path.str());
         }
       }
       ::pclose(PF);
@@ -162,7 +167,7 @@ namespace {
     }
 
     for (llvm::StringRef Path : Paths)
-      Args.addArgument("-I", Path.str());
+      Args.addHeaderSearch(Path.str());
 
     return true;
   }
@@ -170,51 +175,45 @@ namespace {
 #endif
   
   ///\brief Adds standard library -I used by whatever compiler is found in PATH.
+  /// Request any additional host specific setup via cmd-line flags to clang.
   static void AddHostArguments(llvm::StringRef clingBin,
                                std::vector<const char*>& args,
-                               const char* llvmdir, const CompilerOptions& opts) {
+                               const char* llvmdir, const CompilerOptions& opts,
+                               platform::SDK& Sdk) {
     static AdditionalArgList sArguments;
     if (sArguments.empty()) {
       const bool Verbose = opts.Verbose;
 #ifdef _MSC_VER
-      // When built with access to the proper Windows APIs, try to actually find
-      // the correct include paths first. Init for UnivSDK.empty check below.
-      std::string VSDir, WinSDK,
-                  UnivSDK(opts.NoBuiltinInc ? "" : CLING_UCRT_VERSION);
-      if (platform::GetVisualStudioDirs(VSDir,
-                                        opts.NoBuiltinInc ? nullptr : &WinSDK,
-                                        opts.NoBuiltinInc ? nullptr : &UnivSDK,
-                                        Verbose)) {
-        if (!opts.NoCXXInc) {
-          const std::string VSIncl = VSDir + "\\VC\\include";
-          if (Verbose)
-            cling::log() << "Adding VisualStudio SDK: '" << VSIncl << "'\n";
-          sArguments.addArgument("-I", std::move(VSIncl));
-        }
-        if (!opts.NoBuiltinInc) {
-          if (!WinSDK.empty()) {
-            WinSDK.append("\\include");
-            if (Verbose)
-              cling::log() << "Adding Windows SDK: '" << WinSDK << "'\n";
-            sArguments.addArgument("-I", std::move(WinSDK));
-          } else {
-            VSDir.append("\\VC\\PlatformSDK\\Include");
-            if (Verbose)
-              cling::log() << "Adding Platform SDK: '" << VSDir << "'\n";
-            sArguments.addArgument("-I", std::move(VSDir));
+
+      if (!Sdk.UsingEnv()) {
+        auto AddPaths = [](llvm::SmallVectorImpl<std::string> &Paths,
+                           const char *Log, const char* Flag = "-isystem") {
+          for (auto &&Path : Paths) {
+            if (Log)
+              cling::log() << "Adding " << Log << " path: '" << Path << "'\n";
+
+            sArguments.addArgument(Flag, std::move(Path));
           }
-        }
-      }
+          Paths.clear(); // entries have been std::move'd
+        };
 
-#if LLVM_MSC_PREREQ(1900)
-      if (!UnivSDK.empty()) {
-        if (Verbose)
-          cling::log() << "Adding UniversalCRT SDK: '" << UnivSDK << "'\n";
-        sArguments.addArgument("-I", std::move(UnivSDK));
-      }
-#endif
+        // -nostdinc++
+        if (!opts.NoCXXInc && !Sdk.StdInclude.empty())
+          AddPaths(Sdk.StdInclude, Verbose ? "VisualStudio" : nullptr);
 
-      // Windows headers use '__declspec(dllexport) __cdecl' for most funcs
+        // -nobuiltininc
+        if (!opts.NoBuiltinInc && !Sdk.SdkIncludes.empty())
+          AddPaths(Sdk.SdkIncludes, Verbose ? "Windows SDK" : nullptr);
+
+        // Don't let clang do any more setup later.
+        sArguments.addArgument("-nostdinc");
+      } else {
+        // Don't add the resources directory lib/clang/x.x.x/include, it is
+        // handled at the end of this function.
+        sArguments.addArgument("-nobuiltininc");
+	  }
+
+      // Windows headers use '__declspec(dllexport) __cdecl' for most functions
       // causing a lot of warnings for different redeclarations (eg. coming from
       // the test suite).
       // Do not warn about such cases.
@@ -222,13 +221,33 @@ namespace {
       sArguments.addArgument("-Wno-inconsistent-dllimport");
 
       // Assume Windows.h might be included, and don't spew a ton of warnings
-      sArguments.addArgument("-Wno-ignored-attributes");
-      sArguments.addArgument("-Wno-nonportable-include-path");
-      sArguments.addArgument("-Wno-microsoft-enum-value");
-      sArguments.addArgument("-Wno-expansion-to-defined");
+      if (Sdk.Major) {
+        sArguments.addArgument("-Wno-ignored-attributes");
+        sArguments.addArgument("-Wno-nonportable-include-path");
+        sArguments.addArgument("-Wno-microsoft-enum-value");
+        sArguments.addArgument("-Wno-expansion-to-defined");
+        //sArguments.addArgument("-Wno-dllimport-static-field-def");
+        //sArguments.addArgument("-Wno-microsoft-template");
+      }
 
-      //sArguments.addArgument("-Wno-dllimport-static-field-def");
-      //sArguments.addArgument("-Wno-microsoft-template");
+      // Force usage of __builtin_ofsetof (otherwise C++ headers will fail)
+      sArguments.addArgument("-D_CRT_USE_BUILTIN_OFFSETOF");
+      // So child interpreters can also include new (vadefs.h, line 121)
+      sArguments.addArgument("-D_CRT_NO_VA_START_VALIDATION");
+
+      // -fms-compatibility-version=19.00
+      const int Major = _MSC_VER / 100, Minor = _MSC_VER - (Major * 100);
+      smallstream CompatVers;
+      CompatVers << "-fms-compatibility-version=" << Major << '.' << Minor;
+      sArguments.addArgument(CompatVers.str());
+
+      // __declspec(dllimport). Do this only in 'if (Sdk.Major)' above?
+      sArguments.addArgument("-fms-extensions");
+
+      // Should fix http://llvm.org/bugs/show_bug.cgi?id=10528
+      // No need to add this, -fdelayed-template-parsing is set by default, and
+      // doing it here could override user using -fno-delayed-template-parsing
+      //sArguments.addArgument("-fdelayed-template-parsing");
 
 #else // _MSC_VER
 
@@ -304,9 +323,9 @@ namespace {
 
       if (!opts.NoBuiltinInc && !opts.SysRoot) {
         std::string sysRoot;
-        if (platform::GetISysRoot(sysRoot, Verbose)) {
-          if (Verbose)
-            cling::log() << "Using SDK \"" << sysRoot << "\"\n";
+        if (Sdk.getISysRoot(sysRoot)) {
+          if (Sdk.Verbose)
+            (*Sdk.Verbose) << "Using SDK \"" << sysRoot << "\"\n";
           sArguments.addArgument("-isysroot", std::move(sysRoot));
         }
       }
@@ -398,10 +417,15 @@ namespace {
     Opts.MathErrno = 0;
 #endif
 
-    // C++11 is turned on if cling is built with C++11: it's an interpreter;
-    // cross-language compilation doesn't make sense.
+    // If the user has specified a language standard, use that, otherwise set
+    // up the language standard to the one cling was compiled with.
 
-    if (Opts.CPlusPlus) {
+    if (!CompilerOpts.StdVersion && Opts.CPlusPlus) {
+      // clang::driver::Compilation may have already chosen what it thought the
+      // best standard was, so clear them out first.
+      Opts.CPlusPlus1z = 0;
+      Opts.CPlusPlus14 = 0;
+      Opts.CPlusPlus11 = 0;
       switch (CxxStdCompiledWith()) {
         case 17: Opts.CPlusPlus1z = 1; // intentional fall-through
         case 14: Opts.CPlusPlus14 = 1; // intentional fall-through
@@ -430,18 +454,17 @@ namespace {
   static void SetClingTargetLangOpts(LangOptions& Opts,
                                      const TargetInfo& Target,
                                      const CompilerOptions& CompilerOpts) {
-    if (Target.getTriple().getOS() == llvm::Triple::Win32) {
-      Opts.MicrosoftExt = 1;
-#ifdef _MSC_VER
-      Opts.MSCompatibilityVersion = (_MSC_VER * 100000);
-#endif
-      // Should fix http://llvm.org/bugs/show_bug.cgi?id=10528
-      Opts.DelayedTemplateParsing = 1;
-    } else {
-      Opts.MicrosoftExt = 0;
-    }
-
     if (CompilerOpts.DefaultLanguage(Opts)) {
+#if LLVM_ON_WIN32
+      // Sanity check that the base Windows setup is as expected.
+      if (Target.getTriple().getOS() == llvm::Triple::Win32) {
+        assert(Opts.MicrosoftExt && "No Microsoft extensions");
+#if _MSC_VER
+        assert(Opts.MSCompatibilityVersion == (_MSC_VER * 100000));
+#endif
+      }
+#endif
+
 #if _GLIBCXX_USE_FLOAT128
       // We are compiling with libstdc++ with __float128 enabled.
       if (!Target.hasFloat128Type()) {
@@ -593,26 +616,51 @@ static void stringifyPreprocSetting(PreprocessorOptions& PPOpts,
   }
 
   static void AddRuntimeIncludePaths(llvm::StringRef ClingBin,
-                                     clang::HeaderSearchOptions& HOpts) {
-    if (HOpts.Verbose)
-      cling::log() << "Adding runtime include paths:\n";
-    // Add configuration paths to interpreter's include files.
-#ifdef CLING_INCLUDE_PATHS
-    if (HOpts.Verbose)
-      cling::log() << "  \"" CLING_INCLUDE_PATHS "\"\n";
-    utils::AddIncludePaths(CLING_INCLUDE_PATHS, HOpts);
-#endif
-    llvm::SmallString<512> P(ClingBin);
-    if (!P.empty()) {
-      // Remove /cling from foo/bin/clang
-      llvm::StringRef ExeIncl = llvm::sys::path::parent_path(P);
-      // Remove /bin   from foo/bin
-      ExeIncl = llvm::sys::path::parent_path(ExeIncl);
-      P.resize(ExeIncl.size());
-      // Get foo/include
-      llvm::sys::path::append(P, "include");
-      if (llvm::sys::fs::is_directory(P.str()))
-        utils::AddIncludePaths(P.str(), HOpts, nullptr);
+                                     std::vector<const char*>& Args,
+                                     bool Verbose) {
+    // Using a static here follows the pattern used by AddHostArguments.
+    // It both avoids doing work twice, and forces all child Interpreters to
+    // have been invoked with some common set of flags.
+    static std::vector<std::string> sArguments;
+    if (sArguments.empty()) {
+  #ifdef CLING_INCLUDE_PATHS
+      // Add configuration paths to interpreter's include files.
+      llvm::SmallVector<llvm::StringRef, 8> Paths;
+      cling::utils::SplitPaths(CLING_INCLUDE_PATHS, Paths,
+                               utils::kAllowNonExistant, platform::kEnvDelim,
+                               Verbose);
+      for (llvm::StringRef& Path : Paths)
+        sArguments.push_back(Path.str());
+  #endif
+
+      llvm::SmallString<1024> P(ClingBin);
+      if (!P.empty()) {
+        // Remove /cling from foo/bin/clang
+        llvm::StringRef ExeIncl = llvm::sys::path::parent_path(P);
+        // Remove /bin   from foo/bin
+        ExeIncl = llvm::sys::path::parent_path(ExeIncl);
+        P.resize(ExeIncl.size());
+        // Get foo/include
+        llvm::sys::path::append(P, "include");
+        if (llvm::sys::fs::is_directory(P))
+          sArguments.push_back(P.str());
+      }
+    }
+
+    for (const std::string& arg : sArguments) {
+      Args.push_back("-I");
+      Args.push_back(arg.c_str());
+    }
+
+    if (Verbose) {
+      cling::log() << "Added runtime include paths:"
+  #ifdef CLING_INCLUDE_PATHS
+                   << " '" CLING_INCLUDE_PATHS "'"
+  #endif
+                   << "\n";
+
+      for (const std::string& arg : sArguments)
+        cling::log() << "  " << arg << "\n";
     }
   }
 
@@ -739,12 +787,18 @@ static void stringifyPreprocSetting(PreprocessorOptions& PPOpts,
 
     // Add host specific includes, -resource-dir if necessary, and -isysroot
     std::string ClingBin = GetExecutablePath(argv[0]);
-    AddHostArguments(ClingBin, argvCompile, LLVMDir, COpts);
+
+    // Want the WindowsSDK to fall out of scope at the end of this function.
+    platform::SDK Sdk(CLING_SDKEnv, COpts.Verbose ? &cling::errs() : nullptr);
+    AddHostArguments(ClingBin, argvCompile, LLVMDir, COpts, Sdk);
+
+    if (!OnlyLex && !COpts.NoBuiltinInc)
+      AddRuntimeIncludePaths(ClingBin, argvCompile, COpts.Verbose);
 
     // Be explicit about the stdlib on OS X
     // Would be nice on Linux but will warn 'argument unused during compilation'
     // when -nostdinc++ is passed
-#ifdef __APPLE__
+#if defined(__APPLE__)
       if (!COpts.StdLib) {
   #ifdef _LIBCPP_VERSION
         argvCompile.push_back("-stdlib=libc++");
@@ -805,9 +859,9 @@ static void stringifyPreprocSetting(PreprocessorOptions& PPOpts,
     std::unique_ptr<CompilerInstance> CI(new CompilerInstance());
     CI->setInvocation(InvocationPtr);
     CI->setDiagnostics(Diags.get()); // Diags is ref-counted
+
     if (!OnlyLex)
       CI->getDiagnosticOpts().ShowColors = cling::utils::ColorizeOutput();
-
 
     // Copied from CompilerInstance::createDiagnostics:
     // Chain in -verify checker, if requested.
@@ -987,29 +1041,8 @@ static void stringifyPreprocSetting(PreprocessorOptions& PPOpts,
     CGOpts.CXXCtorDtorAliases = 0;
     CGOpts.VerifyModule = 0; // takes too long
 
-    if (!OnlyLex) {
-      // -nobuiltininc
-      clang::HeaderSearchOptions& HOpts = CI->getHeaderSearchOpts();
-      if (CI->getHeaderSearchOpts().UseBuiltinIncludes)
-        AddRuntimeIncludePaths(ClingBin, HOpts);
-
-      // Write a marker to know the rest of the output is from clang
-      if (COpts.Verbose)
-        cling::log() << "Setting up system headers with clang:\n";
-
-      // ### FIXME:
-      // Want to update LLVM to 3.9 realease and better testing first, but
-      // ApplyHeaderSearchOptions shouldn't even be called here:
-      //   1. It's already been called via CI->createPreprocessor(TU_Complete)
-      //   2. It could corrupt clang's directory cache
-      // HeaderSearchOptions.::AddSearchPath is a better alternative
-
-      clang::ApplyHeaderSearchOptions(PP.getHeaderSearchInfo(), HOpts,
-                                      PP.getLangOpts(),
-                                      PP.getTargetInfo().getTriple());
-    }
-
-    return CI.release(); // Passes over the ownership to the caller.
+    // Passes over the ownership to the caller.
+    return CI.release();
   }
 
 } // unnamed namespace

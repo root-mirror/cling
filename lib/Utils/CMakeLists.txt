@@ -41,5 +41,7 @@ add_cling_library(clingUtils OBJECT
 
 if ( MSVC )
   set_target_properties(clingUtils PROPERTIES
-  COMPILE_FLAGS "/D_HAS_EXCEPTIONS=0")
+    COMPILE_FLAGS "/D_HAS_EXCEPTIONS=0")
+  target_sources(clingUtils PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/Windows/WindowsSDK.cpp")
 endif ()

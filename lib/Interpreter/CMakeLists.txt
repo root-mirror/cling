@@ -273,6 +273,7 @@ if (UNIX)
         #define CLING_CXX_PATH \"${CLING_CXX_PATH} ${CMAKE_CXX_FLAGS_NO_I} ${CMAKE_CXX_FLAGS_${uppercase_CMAKE_BUILD_TYPE}}\"
         #define CLING_CXX_RLTV \"${CLING_CXX_RLTV} ${CMAKE_CXX_FLAGS_NO_I} ${CMAKE_CXX_FLAGS_${uppercase_CMAKE_BUILD_TYPE}}\"
         #define CLING_INCLUDE_PATHS \"${CLING_INCLUDE_PATHS}\"
+        #define CLING_SDKEnv \"\"
       ")
     else()
       file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/cling-compiledata.h.in
@@ -280,6 +281,7 @@ if (UNIX)
         #define CLING_CXX_INCL \"${CLING_CXX_HEADERS}\"
         #define CLING_CXX_PATH \"${CLING_CXX_PATH} ${CMAKE_CXX_FLAGS_NO_I} ${CMAKE_CXX_FLAGS_${uppercase_CMAKE_BUILD_TYPE}}\"
         #define CLING_INCLUDE_PATHS \"${CLING_INCLUDE_PATHS}\"
+        #define CLING_SDKEnv \"\"
       ")
     endif()
   else()
@@ -289,14 +291,22 @@ if (UNIX)
       #define CLING_CXX_INCL \"${CLING_CXX_HEADERS}\"
       #define CLING_CXX_RLTV \"${CLING_CXX_RLTV} ${CMAKE_CXX_FLAGS_NO_I} ${CMAKE_CXX_FLAGS_${uppercase_CMAKE_BUILD_TYPE}}\"
       #define CLING_INCLUDE_PATHS \"${CLING_INCLUDE_PATHS}\"
+      #define CLING_SDKEnv \"\"
     ")
   endif()
 
 else()
+    string(REPLACE "\\" "\\\\" CLING_VCToolsInstallDir "$ENV{VCToolsInstallDir}"  )
+    string(REPLACE "\\" "\\\\" CLING_VCINSTALLDIR "$ENV{VCINSTALLDIR}")
     file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/cling-compiledata.h.in
       "
       #define CLING_INCLUDE_PATHS \"${CLING_INCLUDE_PATHS}\"
-      #define CLING_UCRT_VERSION  \"$ENV{UCRTVersion}\"
+      #define CLING_UCRTVersion  \"$ENV{UCRTVersion}\"
+      #define CLING_VisualStudioVersion  \"$ENV{VisualStudioVersion}\"
+      #define CLING_VCINSTALLDIR  \"${CLING_VCINSTALLDIR}\"
+      #define CLING_VCToolsInstallDir  \"${CLING_VCToolsInstallDir}\"
+      #define CLING_VSCMD_VER   \"$ENV{VSCMD_VER}\"
+      #define CLING_SDKEnv  { CLING_UCRTVersion, CLING_VisualStudioVersion, CLING_VCINSTALLDIR, CLING_VCToolsInstallDir, CLING_VSCMD_VER }
     ")
 endif()
 

@@ -47,7 +47,7 @@ namespace {
 
 static bool getISysRootVersion(const std::string& SDKs, int Major,
                                int Minor, std::string& SysRoot,
-                               const char* Verbose) {
+                               llvm::raw_ostream* Verbose, const char* Msg) {
   std::ostringstream os;
   os << SDKs << "MacOSX" << Major << "." << Minor << ".sdk";
 
@@ -55,15 +55,15 @@ static bool getISysRootVersion(const std::string& SDKs, int Major,
   if (llvm::sys::fs::is_directory(SDKv)) {
     SysRoot.swap(SDKv);
     if (Verbose) {
-      cling::errs() << "SDK version matching " << Major << "." << Minor
-                    << " found, this does " << Verbose << "\n";
+      (*Verbose) << "SDK version matching " << Major << "." << Minor
+                    << " found, this does " << Msg << "\n";
     }
     return true;
   }
 
   if (Verbose)
-    cling::errs() << "SDK version matching " << Major << "." << Minor
-                  << " not found, this would " << Verbose << "\n";
+    (*Verbose) << "SDK version matching " << Major << "." << Minor
+                  << " not found, this would " << Msg << "\n";
 
   return false;
 }
@@ -90,7 +90,7 @@ static std::pair<int, int> SplitSDKVersion(int SDKVers) {
 
 } // anonymous namespace
 
-bool GetISysRoot(std::string& sysRoot, bool Verbose) {
+bool MacOSSDK::getISysRoot(std::string& sysRoot) {
   using namespace llvm::sys;
 
   // Some versions of OS X and Server have headers installed
@@ -148,9 +148,9 @@ bool GetISysRoot(std::string& sysRoot, bool Verbose) {
   }
 
   if (majorVers != -1 && minorVers != -1) {
-    if (getISysRootVersion(SDKs, majorVers, minorVers, sysRoot,
-            Verbose ? "match the version of OS X running"
-                    : nullptr)) {
+    if (getISysRootVersion(SDKs, majorVers, minorVers, sysRoot, Verbose,
+                           Verbose ? "match the version of OS X running"
+                                   : nullptr)) {
       return true;
     }
   }
@@ -158,8 +158,9 @@ bool GetISysRoot(std::string& sysRoot, bool Verbose) {
   // MAC_OS_X_VERSION_MAX_ALLOWED is -probably- the SDK being compiled with
   const std::pair<int,int> Vers = SplitSDKVersion(MAC_OS_X_VERSION_MAX_ALLOWED);
   if (Vers.first != majorVers || Vers.second != minorVers) {
-    if (getISysRootVersion(SDKs, Vers.first, Vers.second, sysRoot, Verbose ?
-                               "match what cling was compiled with" : nullptr))
+    if (getISysRootVersion(SDKs, Vers.first, Vers.second, sysRoot, Verbose,
+                           Verbose ? "match what cling was compiled with"
+                                   : nullptr))
       return true;
   }
 
@@ -168,7 +169,7 @@ bool GetISysRoot(std::string& sysRoot, bool Verbose) {
   // against 'MacOSX10.' as this is how they are installed, and fallback to
   // lexicographical sorting if things didn't work out.
   if (Verbose)
-      cling::errs() << "Looking in '" << SDKs << "' for highest version SDK.\n";
+      (*Verbose) << "Looking in '" << SDKs << "' for highest version SDK.\n";
   sysRoot.clear();
   int SdkVers = 0;
   const std::string Match("MacOSX10.");
@@ -188,7 +189,7 @@ bool GetISysRoot(std::string& sysRoot, bool Verbose) {
   }
   if (sysRoot.empty() && !LexicalSdks.empty()) {
     if (Verbose)
-      cling::errs() << "Selecting SDK based on a lexical sort.\n";
+      (*Verbose) << "Selecting SDK based on a lexical sort.\n";
     std::sort(LexicalSdks.begin(), LexicalSdks.end());
     sysRoot.swap(LexicalSdks.back());
   }
