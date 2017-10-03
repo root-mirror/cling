@@ -11,7 +11,7 @@
 // RUN: cd "%T/Remove"
 // RUN: %rmdir "%T/Remove"
 // RUN: %cling %s -Xclang -verify 2>&1 | FileCheck %s
-// REQUIRES: not_system-windows
+// XFAIL: win32, win64
 
 extern "C" {
   int printf(const char*, ...);

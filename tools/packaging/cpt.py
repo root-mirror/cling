@@ -629,6 +629,8 @@ def cleanup():
     print('\n')
     if args['skip_cleanup']:
         box_draw("Skipping cleanup")
+        # Move CI folder to where it was...important for Windows
+        CI_moveClone(1)
         return
 
     box_draw("Clean up")
@@ -1928,6 +1930,29 @@ Install/update the required packages by:
                 choice = input("Please respond with 'yes' or 'no': ")
                 continue
 
+def CI_moveClone(reverse = 0):
+    if not TRAVIS_BUILD_DIR and not APPVEYOR_BUILD_FOLDER:
+        return None
+
+    dirA = TRAVIS_BUILD_DIR if TRAVIS_BUILD_DIR else APPVEYOR_BUILD_FOLDER
+    dirB = os.path.join(srcdir, 'tools', 'cling')
+    if reverse:
+        dirA, dirB = dirB, dirA
+
+    if APPVEYOR_BUILD_FOLDER:
+        # Cannot move the directory: it is being used by another process
+        if not os.path.isdir(dirB):
+            os.mkdir(dirB)
+        for f in os.listdir(dirA):
+            shutil.move(os.path.join(dirA, f), dirB)
+    else:
+        os.rename(dirA, dirB)
+
+    return dirB
+
+if OS == 'Windows':
+    get_win_dep()
+
 if args['current_dev']:
     llvm_revision = urlopen(
         "https://raw.githubusercontent.com/root-project/cling/master/LastKnownGoodLLVMSVNRevision.txt").readline().strip().decode(
@@ -1939,19 +1964,8 @@ if args['current_dev']:
 
     # Travis has already cloned the repo out, so don;t do it again
     # Particularly important for building a pull-request
-    if TRAVIS_BUILD_DIR or APPVEYOR_BUILD_FOLDER:
-        ciCloned = TRAVIS_BUILD_DIR if TRAVIS_BUILD_DIR else APPVEYOR_BUILD_FOLDER
-        clingDir = os.path.join(srcdir, 'tools', 'cling')
-        if TRAVIS_BUILD_DIR:
-            os.rename(ciCloned, clingDir)
-            TRAVIS_BUILD_DIR = clingDir
-        else:
-            # Cannot move the directory: it is being used by another process
-            os.mkdir(clingDir)
-            for f in os.listdir(APPVEYOR_BUILD_FOLDER):
-                shutil.move(os.path.join(APPVEYOR_BUILD_FOLDER, f), clingDir)
-            APPVEYOR_BUILD_FOLDER = clingDir
-
+    clingDir = CI_moveClone()
+    if clingDir:
         # Check validity and show some info
         box_draw("Using CI clone, last 5 commits:")
         exec_subprocess_call('git log -5 --pretty="format:%h <%ae> %<(60,trunc)%s"', clingDir)
@@ -1962,7 +1976,6 @@ if args['current_dev']:
     set_version()
     if args['current_dev'] == 'tar':
         if OS == 'Windows':
-            get_win_dep()
             compile(os.path.join(workdir, 'cling-win-' + platform.machine().lower() + '-' + VERSION), libcpp)
         else:
             if DIST == 'Scientific Linux CERN SLC':
@@ -1995,7 +2008,6 @@ if args['current_dev']:
         cleanup()
 
     elif args['current_dev'] == 'nsis' or (args['current_dev'] == 'pkg' and OS == 'Windows'):
-        get_win_dep()
         compile(os.path.join(workdir, 'cling-' + RELEASE + '-' + platform.machine().lower() + '-' + VERSION), libcpp)
         install_prefix()
         if not args['no_test']:
@@ -2043,7 +2055,6 @@ if args['last_stable']:
     if args['last_stable'] == 'tar':
         set_version()
         if OS == 'Windows':
-            get_win_dep()
             compile(os.path.join(workdir, 'cling-win-' + platform.machine().lower() + '-' + VERSION), libcpp)
         else:
             if DIST == 'Scientific Linux CERN SLC':
@@ -2079,7 +2090,6 @@ if args['last_stable']:
 
     elif args['last_stable'] == 'nsis' or (args['last_stable'] == 'pkg' and OS == 'Windows'):
         set_version()
-        get_win_dep()
         compile(os.path.join(workdir, 'cling-' + DIST + '-' + REV + '-' + platform.machine() + '-' + VERSION), libcpp)
         install_prefix()
         if not args['no_test']:
@@ -2111,7 +2121,6 @@ if args['tarball_tag']:
     set_version()
 
     if OS == 'Windows':
-        get_win_dep()
         compile(os.path.join(workdir, 'cling-win-' + platform.machine().lower() + '-' + VERSION))
     else:
         if DIST == 'Scientific Linux CERN SLC':
@@ -2176,7 +2185,6 @@ if args['nsis_tag']:
     fetch_clang(llvm_revision)
     fetch_cling(args['nsis_tag'])
     set_version()
-    get_win_dep()
     compile(os.path.join(workdir, 'cling-' + DIST + '-' + REV + '-' + platform.machine() + '-' + VERSION), libcpp)
     install_prefix()
     if not args['no_test']:
@@ -2216,7 +2224,6 @@ if args['create_dev_env']:
 
     set_version()
     if OS == 'Windows':
-        get_win_dep()
         compile(os.path.join(workdir, 'cling-win-' + platform.machine().lower() + '-' + VERSION), libcpp)
     else:
         if DIST == 'Scientific Linux CERN SLC':

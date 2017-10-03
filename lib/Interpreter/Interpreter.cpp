@@ -63,6 +63,8 @@
 
 using namespace clang;
 
+extern "C" void* __emutls_get_address(struct __emutls_control*);
+
 namespace {
 
   // Forward cxa_atexit for global d'tors.
@@ -239,8 +241,7 @@ namespace cling {
       return;
     }
 
-    llvm::SmallVector<llvm::StringRef, 6> Syms;
-    Initialize(noRuntime || m_Opts.NoRuntime, isInSyntaxOnlyMode(), Syms);
+    Initialize(noRuntime || m_Opts.NoRuntime, isInSyntaxOnlyMode());
 
     // Commit the transactions, now that gCling is set up. It is needed for
     // static initialization in these transactions through local_cxa_atexit().
@@ -252,23 +253,31 @@ namespace cling {
     if (!isInSyntaxOnlyMode()) {
       if (const Transaction* T = getLastTransaction()) {
         if (llvm::Module* M = T->getModule()) {
-          for (const llvm::StringRef& Sym : Syms) {
-            const llvm::GlobalValue* GV = M->getNamedValue(Sym);
-  #if defined(__GLIBCXX__) && !defined(__APPLE__)
-            // libstdc++ mangles at_quick_exit on Linux when g++ < 5
-            if (!GV && Sym.equals("at_quick_exit"))
-              GV = M->getNamedValue("_Z13at_quick_exitPFvvE");
-  #endif
-            if (GV) {
-              if (void* Addr = m_Executor->getPointerToGlobalFromJIT(*GV))
+          for (llvm::Function &F : M->getFunctionList()) {
+            if (!F.isDeclaration()) {
+              const llvm::StringRef Sym = F.getName();
+              assert(((Sym.find("exit") != Sym.npos) ||
+                      (Sym.find("_Facet_Register") != Sym.npos)) &&
+                     "Unexpected function");
+              if (m_Opts.Verbose())
+                cling::errs() << "Forcing emission of: " << Sym << "\n";
+              if (void* Addr = m_Executor->getPointerToGlobalFromJIT(F))
                 m_Executor->addSymbol(Sym.str().c_str(), Addr, true);
-              else
-                cling::errs() << Sym << " not defined\n";
-            } else
-              cling::errs() << Sym << " not in Module!\n";
+              // else getPointerToGlobalFromJIT will show an error if !Addr
+            }
           }
         }
       }
+#ifdef LLVM_ON_WIN32
+      // FIXME: Using emulated TLS LLVM doesn't respect external TLS data.
+      // By passing itself as the argument to __emutls_get_address, it can
+      // return a pointer to the current thread's _Init_thread_epoch.
+      // This obviously handles only one case, and would need to be rethought
+      // to properly support extern __declspec(thread), though hopefully that
+      // construct is dubious enough to never be used .
+      m_Executor->addSymbol("__emutls_v._Init_thread_epoch",
+          utils::FunctionToVoidPtr(&__emutls_get_address), true);
+#endif
     }
 
     // Disable suggestions for ROOT
@@ -327,6 +336,11 @@ namespace cling {
       delete m_StoredStates[i];
     m_StoredStates.clear();
 
+#if defined(LLVM_ON_WIN32)
+    for (void *Ptr : m_RuntimeFacets)
+      delete reinterpret_cast<std::_Facet_base*>(Ptr)->_Decref();
+#endif
+
     if (m_Executor)
       m_Executor->shuttingDown();
 
@@ -344,8 +358,7 @@ namespace cling {
     m_IncrParser.reset(0);
   }
 
-  Transaction* Interpreter::Initialize(bool NoRuntime, bool SyntaxOnly,
-                              llvm::SmallVectorImpl<llvm::StringRef>& Globals) {
+  Transaction* Interpreter::Initialize(bool NoRuntime, bool SyntaxOnly) {
     largestream Strm;
     const clang::LangOptions& LangOpts = getCI()->getLangOpts();
     const void* ThisP = static_cast<void*>(this);
@@ -358,28 +371,24 @@ namespace cling {
     // (on OS X at least, so probably Linux too) and the JIT thinks the symbol
     // is undefined in a child Interpreter.  And speaking of children, should
     // gCling actually be thisCling, so a child Interpreter can only access
-    // itself? One could use a macro (simillar to __dso_handle) to block
-    // assignemnt and get around the mangling issue.
-    const char* Linkage = LangOpts.CPlusPlus ? "extern \"C\"" : "";
+    // itself?
     if (!NoRuntime) {
-      if (LangOpts.CPlusPlus) {
-        Strm << "#include \"cling/Interpreter/RuntimeUniverse.h\"\n";
-        if (EmitDefinitions)
+      Strm << "#include \"cling/Interpreter/RuntimeUniverse.h\"\n";
+      if (EmitDefinitions) {
+        if (LangOpts.CPlusPlus) {
           Strm << "namespace cling { class Interpreter; namespace runtime { "
-                  "Interpreter* gCling=(Interpreter*)" << ThisP << ";}}\n";
-      } else {
-        Strm << "#include \"cling/Interpreter/CValuePrinter.h\"\n"
-             << "void* gCling";
-        if (EmitDefinitions)
-          Strm << "=(void*)" << ThisP;
-        Strm << ";\n";
+                  "Interpreter* gCling=(Interpreter*)"
+               << ThisP << ";}}\n";
+        } else
+          Strm << "void* gCling =(void*)" << ThisP << ";\n";
       }
     }
 
     // Intercept all atexit calls, as the Interpreter and functions will be long
     // gone when the -native- versions invoke them.
+    const char* Linkage = LangOpts.CPlusPlus ? "extern \"C\" " : "";
 #if defined(__GLIBCXX__) && !defined(__APPLE__)
-    const char* LinkageCxx = "extern \"C++\"";
+    const char* LinkageCxx = "extern \"C++\" ";
     const char* Attr = LangOpts.CPlusPlus ? " throw () " : "";
     const char* cxa_atexit_is_noexcept = LangOpts.CPlusPlus ? " noexcept" : "";
 #else
@@ -403,58 +412,79 @@ namespace cling {
     //     atexit below isn't linking to the __dso_handle symbol.
 
     // Use __cxa_atexit to intercept all of the following routines
-    Strm << Linkage << " int __cxa_atexit(void (*f)(void*), void*, void*) "
+    Strm << Linkage << "int __cxa_atexit(void (*f)(void*), void*, void*)"
          << cxa_atexit_is_noexcept << ";\n";
 
-    if (EmitDefinitions)
+    const char* FnDef;
+    if (EmitDefinitions) {
       Strm << "#define __dso_handle ((void*)" << ThisP << ")\n";
+      FnDef = " { return __cxa_atexit((void(*)(void*))f, 0, __dso_handle); }\n";
+    } else
+      FnDef = ";\n";
 
     // C atexit, std::atexit
-    Strm << Linkage << " int atexit(void(*f)()) " << Attr;
-    if (EmitDefinitions)
-      Strm << " { return __cxa_atexit((void(*)(void*))f, 0, __dso_handle); }\n";
-    else
-      Strm << ";\n";
-    Globals.push_back("atexit");
+    Strm << Linkage << "int atexit(void(*f)())" << Attr << FnDef;
 
     // C++ 11 at_quick_exit, std::at_quick_exit
-    if (LangOpts.CPlusPlus && LangOpts.CPlusPlus11) {
-      Strm << LinkageCxx << " int at_quick_exit(void(*f)()) " << Attr;
-      if (EmitDefinitions)
-        Strm
-          << " { return __cxa_atexit((void(*)(void*))f, 0, __dso_handle); }\n";
-      else
-        Strm << ";\n";
-      Globals.push_back("at_quick_exit");
-    }
+    if (LangOpts.CPlusPlus && LangOpts.CPlusPlus11)
+      Strm << LinkageCxx << "int at_quick_exit(void(*f)())" << Attr << FnDef;
 
 #if defined(LLVM_ON_WIN32)
     // Windows specific: _onexit, _onexit_m, __dllonexit
+    const char* const WinFnDef = !EmitDefinitions ? FnDef :
+      " { __cxa_atexit((void(*)(void*))f, 0, __dso_handle); return f; }\n";
 #if !defined(_M_CEE)
-    const char* Spec = "__cdecl";
+    const char* Spec = "__cdecl ";
 #else
-    const char* Spec = "__clrcall";
+    const char* Spec = "__clrcall ";
 #endif
-    Strm << Linkage << " " << Spec << " int (*__dllonexit("
-         << "int (" << Spec << " *f)(void**, void**), void**, void**))"
-         "(void**, void**)";
-      if (EmitDefinitions)
-        Strm << " { __cxa_atexit((void(*)(void*))f, 0, __dso_handle);"
-                " return f; }\n";
-      else
-        Strm << ";\n";
-    Globals.push_back("__dllonexit");
+    const bool ParamNames = LangOpts.C99;
+    Strm << Linkage << "int (*__dllonexit("
+         << "int (" << Spec << "*f)(void**, void**),"
+         << "void**" << (ParamNames ? " a" : "") << ","
+         << "void**" << (ParamNames ? " b" : "")
+         << "))(void**, void**)" << WinFnDef;
 #if !defined(_M_CEE_PURE)
-    Strm << Linkage << " " << Spec << " int (*_onexit("
-         << "int (" << Spec << " *f)()))()";
-    if (EmitDefinitions)
-      Strm << " { __cxa_atexit((void(*)(void*))f, 0, __dso_handle);"
-              " return f; }\n";
-    else
-      Strm << ";\n";
-    Globals.push_back("_onexit");
+    Strm << Linkage << Spec << "int (*_onexit(int (" << Spec << "*f)()))()"
+         << WinFnDef;
 #endif
+
+    if (EmitDefinitions && LangOpts.CPlusPlus) {
+      // MSVC retains a linked list of all facets created for a process.
+      // This is a problem as ~Interpreter will release the memory aquired
+      // for a facets v-table, and after main exits MSVC will then try to
+      // cleanup the registered facets but the pointers are invalid.
+      //
+      // To get around this we override std::_Facet_Register(_Facet_base* P) ->
+      //   __cxa_atexit(__dso_handle, P, __dso_handle);
+      // In Interpreter::AddAtExitFunc we check if the registered function is
+      // actually a pointer to -this- and when it is, save the facet so that
+      // destruction will occur in Interpreter::~Interpreter.
+      //
+      // Try to use MSVCs _STD_BEGIN when defined, but when --norutime is given
+      // it may not be defined. So assert in DEBUG that it is what is expected.
+#ifndef NDEBUG
+      if (!NoRuntime) assert(getMacroValue("_STD_BEGIN") == "namespace std {");
 #endif
+      const std::pair<const char* const, const char* const> StdNamespace =
+          getMacro("_STD_BEGIN") ? std::make_pair("_STD_BEGIN ", " _STD_END")
+                                 : std::make_pair("namespace std { ", " }");
+#if !defined(_M_CEE)
+      const char* const FacetReg = "_Facet_Register";
+#else
+      const char* const FacetReg = "_Facet_Register_m";
+#endif
+      const std::string CrtImp2Pure = getMacroValue("_CRTIMP2_PURE");
+
+      Strm << StdNamespace.first
+           << "class " << CrtImp2Pure << " _Facet_base;"
+           << "void " << Spec << ' ' << FacetReg
+           << "(_Facet_base* F) { __cxa_atexit((void(*)(void*))__dso_handle, "
+              "F, __dso_handle); }"
+           << StdNamespace.second << "\n";
+  }
+
+#endif // LLVM_ON_WIN32
 
     if (!SyntaxOnly) {
       // Override the native symbols now, before anything can be emitted.
@@ -1529,6 +1559,12 @@ namespace cling {
   }
 
   void Interpreter::AddAtExitFunc(void (*Func) (void*), void* Arg) {
+#ifdef LLVM_ON_WIN32
+    if (utils::FunctionToVoidPtr(Func) == this) {
+      m_RuntimeFacets.insert(Arg);
+      return;
+    }
+#endif
     m_Executor->AddAtExitFunc(Func, Arg, getLatestTransaction()->getModule());
   }
 

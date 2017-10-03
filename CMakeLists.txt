@@ -221,8 +221,20 @@ else()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 endif()
 
-if(MSVC)
+if(WIN32)
   add_definitions(/DNOMINMAX)
+
+  # Options to use COFF, and enable exception handling on Windows-64
+  option(CLING_WIN_COFF_JIT "Use COFF object format for JIT." OFF)
+  if (CLING_WIN_COFF_JIT)
+    add_definitions(-DCLING_WIN_COFF_JIT=1)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+      option(CLING_WIN_SEH_EXCEPTIONS "Enable Windows exception handling." OFF)
+      if (CLING_WIN_SEH_EXCEPTIONS)
+        add_definitions(-DCLING_WIN_SEH_EXCEPTIONS=1)
+      endif()
+    endif()
+  endif()
 endif()
 
 if (APPLE)

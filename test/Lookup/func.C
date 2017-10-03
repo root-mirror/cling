@@ -24,12 +24,11 @@ using namespace llvm;
 
 void dumpDecl(const char* title, const clang::Decl* D) {
   printf("%s: 0x%lx\n", title, (unsigned long) D);
-  std::string S;
-  llvm::raw_string_ostream OS(S);
+  cling::outs() << title << " name: ";
   dyn_cast<clang::NamedDecl>(D)
-    ->getNameForDiagnostic(OS, D->getASTContext().getPrintingPolicy(),
+    ->getNameForDiagnostic(cling::outs(), D->getASTContext().getPrintingPolicy(),
                            /*Qualified=*/true);
-  printf("%s name: %s\n", title, OS.str().c_str());
+  cling::outs() << "\n";
   D->print(cling::outs());
 }
 .rawInput

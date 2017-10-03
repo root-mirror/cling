@@ -7,33 +7,38 @@
 // RUN: cat %s | %cling -DCLING_TMP="\"%/T\"" 2> %T/stderr.txt && cat %T/stderr.txt | FileCheck --check-prefix=CHECKERR %s
 // RUN: cat %s | %cling -DCLING_TMP="\"%/T\"" 2>&1 | FileCheck --check-prefix=CHECKERR --check-prefix=CHECKOUT %s
 
+#ifndef _WIN32
 #include <iostream>
-
-extern "C" int setenv(const char *name, const char *value, int overwrite);
-extern "C" int _putenv_s(const char *name, const char *value);
-static void setup() {
-#ifdef _WIN32
- #define setenv(n, v, o) _putenv_s(n,v)
+#define WRITE_STD_OUT(X) (std::cout << X)
+#define WRITE_STD_ERR(X) (std::cerr << X)
+#define SETUP(CLING_TMP) (::setenv("CLING_TMP", CLING_TMP, 1))
+#else
+#include <stdio.h>
+#define WRITE_STD_OUT(X) (::fprintf(stdout, X))
+#define WRITE_STD_ERR(X) (::fprintf(stderr, X))
+#define SETUP(CLING_TMP) (::_putenv_s("CLING_TMP", CLING_TMP))
 #endif
-  ::setenv("CLING_TMP", CLING_TMP, 1);
-}
-setup();
+
+// FIXME: WRITE_STD_OUT & WRITE_STD_ERR macros should go away.
+
+
+SETUP(CLING_TMP);
 
 // ROOT-8696
 .5 //CHECKOUT: (double) 0.500000
 
 .2>&1
-std::cerr << "Error into stdout.\n";
+WRITE_STD_ERR("Error into stdout.\n");
 //CHECKOUT: Error into stdout.
 .2>
-std::cerr << "Error back from stdout.\n";
+WRITE_STD_ERR("Error back from stdout.\n");
 //CHECKERR: Error back from stdout.
 
 .1>&2
-std::cout << "stdout into stderr.\n";
+WRITE_STD_OUT("stdout into stderr.\n");
 //CHECKERR: stdout into stderr.
 .1>
-std::cout << "stdout back from stderr.\n";
+WRITE_STD_OUT("stdout back from stderr.\n");
 //CHECKOUT: stdout back from stderr.
 
 // Test redirect stdout
@@ -46,7 +51,7 @@ int c = 103
 //CHECK-REDIRECTOUT: (int) 103
 
 // Test stderr is not redirected as well.
-std::cerr << "Into Error\n";
+WRITE_STD_ERR("Into Error\n");
 //CHECKERR: Into Error
 
 // Test toggle back to prompt.
@@ -65,7 +70,7 @@ c = 993
 
 // Test redirect stderr
 .2> $CLING_TMP/errfile.txt
-std::cerr << "Error redirected.\n";
+WRITE_STD_ERR("Error redirected.\n");
 //CHECK-REDIRECTERR: Error redirected.
 
 // Test stdout is still redirected to the correct file.
@@ -76,12 +81,12 @@ var = 20
 .>
 a = 100
 //CHECKOUT: (int) 100
-std::cerr << "Error still redirected.\n";
+WRITE_STD_ERR("Error still redirected.\n");
 //CHECK-REDIRECTERR: Error still redirected.
 
 // Test toggle stderr back to prompt.
 .2>
-std::cerr << "Error back to prompt.\n";
+WRITE_STD_ERR("Error back to prompt.\n");
 //CHECKERR: Error back to prompt.
 
 
@@ -93,14 +98,14 @@ b=311
 //CHECK-REDIRECTBOTH: (int) 311
 c=312
 //CHECK-REDIRECTBOTH: (int) 312
-std::cerr << "Redirect both out & err.\n";
+WRITE_STD_ERR("Redirect both out & err.\n");
 //CHECK-REDIRECTBOTH: Redirect both out & err.
 
 // Test toggle both back to the prompt.
 .&>
 var = 400
 //CHECKOUT: (int) 400
-std::cerr << "Both back to prompt.\n";
+WRITE_STD_ERR("Both back to prompt.\n");
 //CHECKERR: Both back to prompt.
 
 // Test append mode for both streams.
@@ -111,7 +116,7 @@ b=492
 //CHECK-REDIRECTBOTH: (int) 492
 c=493
 //CHECK-REDIRECTBOTH: (int) 493
-std::cerr << "Append mode for both streams.\n";
+WRITE_STD_ERR("Append mode for both streams.\n");
 //CHECK-REDIRECTBOTH: Append mode for both streams.
 
 
@@ -119,13 +124,13 @@ std::cerr << "Append mode for both streams.\n";
 .>
 var = 699
 //CHECKOUT: (int) 699
-std::cerr << "Err is still in &> file.\n";
+WRITE_STD_ERR("Err is still in &> file.\n");
 //CHECK-REDIRECTBOTH: Err is still in &> file.
 
 
 // Test toggle stderr to the prompt when redirected with &.
 .2>
-std::cerr << "Err back from &> file.\n";
+WRITE_STD_ERR("Err back from &> file.\n");
 //CHECKERR: Err back from &> file.
 
 // Test redirect to filename without space

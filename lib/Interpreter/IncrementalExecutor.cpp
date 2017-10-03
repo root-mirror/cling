@@ -93,6 +93,9 @@ IncrementalExecutor::IncrementalExecutor(clang::DiagnosticsEngine& diags,
   std::atomic_flag_clear( &m_AtExitFuncsSpinLock );
 
   std::unique_ptr<TargetMachine> TM(CreateHostTargetMachine(CI));
+
+  TM->Options.EmulatedTLS = 1;
+
   m_BackendPasses.reset(new BackendPasses(CI.getCodeGenOpts(),
                                           CI.getTargetOpts(),
                                           CI.getLangOpts(),

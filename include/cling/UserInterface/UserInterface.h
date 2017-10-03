@@ -20,16 +20,23 @@ namespace cling {
   ///
   class UserInterface {
   private:
+    class TextInputHolder;
+    std::unique_ptr<TextInputHolder> m_TextInput;
     std::unique_ptr<MetaProcessor> m_MetaProcessor;
 
     ///\brief Prints cling's startup logo
     ///
     void PrintLogo();
   public:
-    UserInterface(Interpreter& interp);
+    UserInterface();
     ~UserInterface();
 
     MetaProcessor* getMetaProcessor() { return m_MetaProcessor.get(); }
+
+    ///\brief Attach this instance to the given Interpreter.
+    /// @param[in] Interp - The interpreter to attach to.
+    ///
+    void attach(Interpreter& Interp);
 
     ///\brief Drives the interactive prompt talking to the user.
     /// @param[in] nologo - whether to show cling's welcome logo or not

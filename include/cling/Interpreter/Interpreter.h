@@ -19,6 +19,10 @@
 #include <string>
 #include <unordered_map>
 
+#ifdef LLVM_ON_WIN32
+#include <unordered_set>
+#endif
+
 namespace llvm {
   class raw_ostream;
   struct GenericValue;
@@ -203,6 +207,11 @@ namespace cling {
     };
     mutable const Transaction* m_CachedTrns[kNumTransactions] = {};
 
+#ifdef LLVM_ON_WIN32
+    // Windows specific _Facet_base pointers registered at runtime.
+    std::unordered_set<void*> m_RuntimeFacets;
+#endif
+
     ///\brief Worker function, building block for interpreter's public
     /// interfaces.
     ///
@@ -290,12 +299,10 @@ namespace cling {
     ///
     ///\param[in] NoRuntime - Don't include the runtime headers / gCling
     ///\param[in] SyntaxOnly - In SyntaxOnly mode
-    ///\param[out] Globals - Global symbols that need to be emitted
     ///
     ///\returns The resulting Transation of initialization.
     ///
-    Transaction* Initialize(bool NoRuntime, bool SyntaxOnly,
-                            llvm::SmallVectorImpl<llvm::StringRef>& Globals);
+    Transaction* Initialize(bool NoRuntime, bool SyntaxOnly);
 
     ///\brief The target constructor to be called from both the delegating
     /// constructors. parentInterp might be nullptr.

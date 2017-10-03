@@ -18,17 +18,24 @@ clone_depth: 10
 environment:
   VSTUDIO_VERS: Microsoft Visual Studio 14.0
   matrix:
-    - CMAKE_GEN: Visual Studio 14 2015 Win64
     - CMAKE_GEN: Ninja
+      CLING_CMAKE_FLAGS: -DCLING_WIN_COFF_JIT=ON -DCLING_WIN_SEH_EXCEPTIONS=ON
+      CLING_DEV: branches:master,cling-patches,RuntimeDyldCOFFX86_64
 
-# matrix:
-#  set this flag to immediately finish build once one of the jobs fails.
-#  fast_finish: true 
-#  allow_failures:
-#  - platform: x86
-#    configuration: Release
-#  - platform: x64
-#    configuration: Release
+    - CMAKE_GEN: Visual Studio 14 2015 Win64
+      CLING_DEV: tar
+
+    - CMAKE_GEN: Ninja
+      CLING_DEV: tar
+
+    - CMAKE_GEN: Ninja
+      CLING_CMAKE_FLAGS: -DCLING_WIN_COFF_JIT=ON
+      CLING_DEV: tar
+
+matrix:
+  allow_failures:
+    - platform: x64
+      CLING_DEV: tar
 
 skip_tags: true
 os:
@@ -42,20 +49,31 @@ build:
 install:
   - C:\"Program Files (x86)"\"%VSTUDIO_VERS%"\VC\vcvarsall.bat %platform%
   - set PATH=C:\projects\deps\ninja;C:\gnuwin32\bin;%PATH%
-  - |-
-    if exist "C:\projects\deps\ninja\" set GETNINJA=rem
-    if not "%CMAKE_GEN%"=="Ninja" set GETNINJA=rem
-    %GETNINJA% appveyor DownloadFile "https://github.com/ninja-build/ninja/releases/download/v1.7.2/ninja-win.zip" -FileName ninja.zip
-    %GETNINJA% 7z x ninja.zip -oC:\projects\deps\ninja > nul
-    %GETNINJA% ninja --version
+  - ps: |
+     If ($env:Configuration -Match "Debug") {
+       $env:CLING_CMAKE_FLAGS="$env:CLING_CMAKE_FLAGS -DLLVM_OPTIMIZED_TABLEGEN=ON"
+     }
+     If ($env:CMAKE_GEN -Match "Ninja" -and !(Test-Path "C:\projects\deps\ninja")) {
+       Start-FileDownload 'https://github.com/ninja-build/ninja/releases/download/v1.7.2/ninja-win.zip'
+       & 7z x ninja-win.zip -oC:\projects\deps\ninja > $null
+       & ninja --version
+     }
+     If ($env:CLING_CMAKE_FLAGS -Match "-DCLING_WIN_SEH_EXCEPTIONS=ON") {
+       Echo "Exceptions Enabled"
+       $env:CLING_DEV="branches:master,cling-patches,RuntimeDyldCOFFX86_64"
+       $env:LLVM_REPO="https://github.com/marsupial/llvm.git"
+     } else {
+       $env:CLING_DEV="tar"
+       $env:LLVM_REPO="http://root.cern.ch/git/llvm.git"
+     }
 
 build_script:
   - tools\packaging\cpt.py ^
-        --current-dev=tar ^
+        --current-dev=%CLING_DEV% ^
         --with-cling-url=https://github.com/%APPVEYOR_REPO_NAME% ^
         --with-clang-url=http://root.cern.ch/git/clang.git ^
-        --with-llvm-url=http://root.cern.ch/git/llvm.git ^
-        --with-cmake-flags="-DLLVM_OPTIMIZED_TABLEGEN=ON -G\"%CMAKE_GEN%\"" ^
+        --with-llvm-url=%LLVM_REPO% ^
+        --with-cmake-flags="%CLING_CMAKE_FLAGS% -G\"%CMAKE_GEN%\"" ^
         --skip-cleanup
 
 init:

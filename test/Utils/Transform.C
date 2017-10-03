@@ -14,6 +14,7 @@
 #include "cling/Interpreter/Interpreter.h"
 #include "cling/Interpreter/LookupHelper.h"
 #include "cling/Utils/AST.h"
+#include "cling/Utils/Output.h"
 #include "clang/AST/Type.h"
 #include "clang/AST/ASTContext.h"
 #include "llvm/ADT/SmallSet.h"
@@ -381,7 +382,7 @@ if (decl) {
         clang::QualType vdType = vd->getType();
         name.clear();
         Transform::GetPartiallyDesugaredType(Ctx,vdType,transConfig).getAsStringInternal(name,Policy);
-        std::cout << name.c_str() << std::endl;
+        cling::outs() << name.c_str() << '\n';
       }
       ++iter;
     }
@@ -422,7 +423,7 @@ if (decl) {
 // which case the type is a RecordDecl rather than a TemplateInstantationType
 decl = lookup.findScope("std::pair<Details::Impl,std::vector<Details::Impl> >", diags,&t);
 QT = clang::QualType(t, 0);
-std::cout << Transform::GetPartiallyDesugaredType(Ctx, QT, transConfig).getAsString().c_str() << std::endl;
+cling::outs() << Transform::GetPartiallyDesugaredType(Ctx, QT, transConfig).getAsString().c_str() << '\n';
 // CHECK: std::pair<Details::Impl, std::vector<Details::Impl> >
 
 if (const clang::RecordDecl *rdecl = llvm::dyn_cast_or_null<clang::RecordDecl>(decl)) {
@@ -435,7 +436,7 @@ if (const clang::RecordDecl *rdecl = llvm::dyn_cast_or_null<clang::RecordDecl>(d
     name.clear();
     clang::QualType fdType = field_iter->getType();
     Transform::GetPartiallyDesugaredType(Ctx,fdType,transConfig).getAsStringInternal(name,Policy);
-    std::cout << name.c_str() << std::endl;
+    cling::outs() << name.c_str() << '\n';
     ++field_iter;
     ++i;
   }
@@ -456,7 +457,7 @@ if (decl) {
         clang::QualType vdType = vd->getType();
         name.clear();
         Transform::GetPartiallyDesugaredType(Ctx,vdType,transConfig).getAsStringInternal(name,Policy);
-        std::cout << name.c_str() << std::endl;
+        cling::outs() << name.c_str() << '\n';
       }
       ++iter;
     }
@@ -468,10 +469,10 @@ if (decl) {
 
 decl = lookup.findScope("cmap<volatile int,volatile int>", diags,&t);
 QT = clang::QualType(t, 0);
-std::cout << Transform::GetPartiallyDesugaredType(Ctx, QT, transConfig).getAsString().c_str() << std::endl;
+cling::outs() << Transform::GetPartiallyDesugaredType(Ctx, QT, transConfig).getAsString().c_str() << '\n';
 if (const clang::RecordDecl *rdecl = llvm::dyn_cast_or_null<clang::RecordDecl>(decl)) {
   QT = clang::QualType(rdecl->getTypeForDecl(), 0);
-  std::cout << Transform::GetPartiallyDesugaredType(Ctx, QT, transConfig).getAsString().c_str() << std::endl;
+  cling::outs() << Transform::GetPartiallyDesugaredType(Ctx, QT, transConfig).getAsString().c_str() << '\n';
   clang::RecordDecl::field_iterator field_iter = rdecl->field_begin();
   // For some reason we can not call field_end:
   // cling: root/interpreter/llvm/src/tools/clang/lib/CodeGen/CGCall.cpp:1839: void checkArgMatches(llvm::Value*, unsigned int&, llvm::FunctionType*): Assertion `Elt->getType() == FTy->getParamType(ArgNo)' failed.
@@ -481,7 +482,7 @@ if (const clang::RecordDecl *rdecl = llvm::dyn_cast_or_null<clang::RecordDecl>(d
     name.clear();
     clang::QualType fdType = field_iter->getType();
     Transform::GetPartiallyDesugaredType(Ctx,fdType,transConfig).getAsStringInternal(name,Policy);
-    std::cout << name.c_str() << std::endl;
+    cling::outs() << name.c_str() << '\n';
     ++field_iter;
     ++i;
   }

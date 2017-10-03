@@ -104,17 +104,7 @@ namespace cling {
     RedirectStack m_Stack;
     int m_Bak[kNumRedirects];
     int m_CurStdOut;
-
-#ifdef LLVM_ON_WIN32
-    // After a redirection from stdout into stderr then undirecting stdout, the
-    // console will loose line-buffering. To get arround this we test if stdout
-    // is a tty during construction, and if so mark the case when stdout has
-    // returned from a redirection into stderr, then handle it ~RedirectOutput.
-    // We need two bits for 3 possible states.
-    unsigned m_TTY : 2;
-#else
     const bool m_TTY;
-#endif
 
     // Exception safe push routine
     int push(Redirect* R) {
@@ -169,7 +159,7 @@ namespace cling {
 
   public:
     RedirectOutput() : m_CurStdOut(kInvalidFD),
-      m_TTY(::isatty(STDOUT_FILENO) ? 1 : 0) {
+      m_TTY(::isatty(STDOUT_FILENO)) {
       for (unsigned i = 0; i < kNumRedirects; ++i)
         m_Bak[i] = kInvalidFD;
     }
@@ -181,16 +171,21 @@ namespace cling {
         m_Stack.pop_back();
 
 #ifdef LLVM_ON_WIN32
-      // State 2, was tty to begin with, then redirected to stderr and back.
-      if (m_TTY == 2)
-        ::freopen("CON", "w", stdout);
+      if (!m_TTY) {
+        ::fflush(stderr);
+        ::fflush(stdout);
+      }
+      const int Mode = _IONBF;
+      const size_t Size = 0;
 #else
+      const int Mode = _IOLBF;
+      const size_t Size = BUFSIZ;
+#endif
       // If redirection took place without writing anything to the terminal
       // beforehand (--nologo) then the dup2 relinking stdout will have caused
       // it to be re-opened without line buffering.
       if (m_TTY)
-        ::setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
-#endif
+        ::setvbuf(stdout, NULL, Mode, Size);
     }
 
     void redirect(llvm::StringRef file, bool apnd,
@@ -208,11 +203,6 @@ namespace cling {
           Redirect *R = (*it).get();
           const unsigned Match = R->Scope & lScope;
           if (Match) {
-#ifdef LLVM_ON_WIN32
-            // stdout back from stderr, fix up our console output on destruction
-            if (m_TTY && R->FD == m_Bak[1] && scope & kSTDOUT)
-              m_TTY = 2;
-#endif
             // Clear the flag so restore below will ignore R for scope
             R->Scope = MetaProcessor::RedirectionScope(R->Scope & ~Match);
             // If no scope left, then R should be removed

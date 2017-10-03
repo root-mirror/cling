@@ -21,7 +21,11 @@
 #define __STDC_CONSTANT_MACROS // needed by System/DataTypes.h
 #endif
 
-#ifdef __cplusplus
+#ifndef __cplusplus
+
+extern void* gCling;
+
+#else
 
 #include <new>
 
@@ -177,15 +181,20 @@ namespace cling {
 using namespace cling::runtime;
 
 extern "C" {
-  ///\brief a function that throws InvalidDerefException. This allows to 'hide'
-  /// the definition of the exceptions from the RuntimeUniverse and allows us to
-  /// run cling in -no-rtti mode.
-  ///
 
-  void* cling_runtime_internal_throwIfInvalidPointer(void* Sema,
-                                                    void* Expr,
-                                                    const void* Arg);
-}
 #endif // __cplusplus
+
+///\brief a function that throws InvalidDerefException. This allows to 'hide'
+/// the definition of the exceptions from the RuntimeUniverse and allows us to
+/// run cling in -no-rtti mode.
+///
+
+void* cling_runtime_internal_throwIfInvalidPointer(void* Sema,
+                                                   void* Expr,
+                                                   const void* Arg);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 #endif // CLING_RUNTIME_UNIVERSE_H

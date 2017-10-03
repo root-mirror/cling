@@ -48,12 +48,11 @@ if(MSVC)
   set(cling_exports ${cling_exports} ??_7type_info@@6B@
     ?__type_info_root_node@@3U__type_info_node@@A
     ?nothrow@std@@3Unothrow_t@1@B
-    ?_Facet_Register@std@@YAXPEAV_Facet_base@1@@Z
   )
 
   # Compiler added symbols for static variables. NOT for VStudio < 2015
-  set(cling_exports ${cling_exports} _Init_thread_abort _Init_thread_epoch
-    _Init_thread_footer _Init_thread_header _tls_index
+  set(cling_exports ${cling_exports} _Init_thread_abort
+    _Init_thread_footer _Init_thread_header
   )
 
   # new/delete variants needed when linking to static msvc runtime (esp. Debug)
@@ -89,6 +88,11 @@ if(MSVC)
     ?write_impl@raw_string_ostream@llvm@@EEAAXPEBD_K@Z
     ?castToDeclContext@Decl@clang@@SAPEAVDeclContext@2@PEBV12@@Z
     ?classof@DeclContext@clang@@SA_NPEBVDecl@2@@Z
+    ?dump@Decl@clang@@QEBAXAEAVraw_ostream@llvm@@_N@Z
+    ?current_pos@raw_svector_ostream@llvm@@EEBA_KXZ
+    ?write_impl@raw_svector_ostream@llvm@@EEAAXPEBD_K@Z
+    ?pwrite_impl@raw_svector_ostream@llvm@@EEAAXPEBD_K1@Z
+    ?SetBufferAndMode@raw_ostream@llvm@@AEAAXPEAD_KW4BufferKind@12@@Z
   )
 
   if ($<CONFIG:Debug>)
