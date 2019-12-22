@@ -97,7 +97,10 @@ class ClingKernel(Kernel):
 
     def __init__(self, **kwargs):
         super(ClingKernel, self).__init__(**kwargs)
-        clingInPath = shutil.which('cling')
+        try:
+            clingInPath = shutil.which('cling')
+        except AttributeError:
+            clingInPath = None
         if not clingInPath:
             from distutils.spawn import find_executable
             clingInPath = find_executable('cling')

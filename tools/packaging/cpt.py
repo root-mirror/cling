@@ -21,17 +21,7 @@
 
 # Python 2 and Python 3 compatibility
 from __future__ import print_function
-
 import sys
-
-if sys.version_info < (3, 0):
-    # Python 2.x
-    from urllib2 import urlopen
-    input = raw_input
-else:
-    # Python 3.x
-    from urllib.request import urlopen
-
 import argparse
 import os
 import platform
@@ -46,9 +36,15 @@ from email.utils import formatdate
 from datetime import tzinfo
 import time
 import multiprocessing
-import fileinput
 import stat
 import json
+if sys.version_info < (3, 0):
+    # Python 2.x
+    from urllib2 import urlopen
+    input = raw_input
+else:
+    # Python 3.x
+    from urllib.request import urlopen
 
 
 ###############################################################################
@@ -471,7 +467,6 @@ def compile(arg, build_libcpp):
     travis_fold_start("compile")
     global prefix, EXTRA_CMAKE_FLAGS
     prefix = arg
-    PYTHON = sys.executable
 
     # Cleanup previous installation directory if any
     if os.path.isdir(prefix):
@@ -571,7 +566,7 @@ def install_prefix():
     box_draw("Filtering Cling's libraries and binaries")
 
     regex_array = []
-    regex_filename = os.path.join(CPT_SRC_DIR, 'dist-files.txt');
+    regex_filename = os.path.join(CPT_SRC_DIR, 'dist-files.txt')
     for line in open(regex_filename).read().splitlines():
       if line and not line.startswith('#'):
         regex_array.append(line)
@@ -620,7 +615,7 @@ def test_cling():
     # Run single tests on CI with this
     # runSingleTest('Prompt/ValuePrinter/Regression.C')
     # runSingleTest('Prompt/ValuePrinter')
-    build = Build('check-cling')
+    Build('check-cling')
 
 def tarball():
     box_draw("Compress binaries into a bzip2 tarball")
@@ -923,7 +918,7 @@ Comment: Cling can also be licensed under University of Illinois/NCSA
 # -*- makefile -*-
 
 %:
-	dh $@
+\tdh $@
 
 override_dh_auto_build:
 
@@ -943,6 +938,7 @@ cling (%s-1) unstable; urgency=low
     f.write(template.lstrip())
     f.close()
 
+    STABLE_FLAG = '0'
     if '~dev' in VERSION:
         TAG = str(float(VERSION[:VERSION.find('~')]) - 0.1)
         template = exec_subprocess_check_output('git log v' + TAG + '...HEAD --format="  * %s" | fmt -s', CLING_SRC_DIR)
@@ -1166,7 +1162,7 @@ rm -rf %{buildroot}
 def check_win(pkg):
     # Check for Microsoft Visual Studio 14.0
     if pkg == "msvc":
-        if exec_subprocess_check_output('REG QUERY HKEY_CLASSES_ROOT\VisualStudio.DTE.14.0', 'C:\\').find(
+        if exec_subprocess_check_output('REG QUERY HKEY_CLASSES_ROOT\\VisualStudio.DTE.14.0', 'C:\\').find(
                 'ERROR') == -1:
             print(pkg.ljust(20) + '[OK]'.ljust(30))
         else:
@@ -1266,7 +1262,7 @@ def make_nsi():
         exec_subprocess_check_output('git describe --match v* --abbrev=0 --tags', CLING_SRC_DIR).strip().splitlines()[0]
     print('Create file: ' + os.path.join(workdir, 'cling.nsi'))
     f = open(os.path.join(workdir, 'cling.nsi'), 'w')
-    template = '''
+    template = r'''
 ; Cling setup script %s
 !define APP_NAME "Cling"
 !define COMP_NAME "CERN"
@@ -1297,7 +1293,7 @@ Caption "${APP_NAME}"
 OutFile "${INSTALLER_NAME}"
 BrandingText "${APP_NAME}"
 XPStyle on
-InstallDir "C:\\Cling\\cling-${VERSION}"
+InstallDir "C:\Cling\cling-${VERSION}"
 
 ###############################################################################
 ; MUI settings
@@ -1308,8 +1304,8 @@ InstallDir "C:\\Cling\\cling-${VERSION}"
 !define MUI_HEADERIMAGE
 
 ; Theme
-!define MUI_ICON "%s\\LLVM.ico"
-!define MUI_UNICON "%s\\Contrib\\Graphics\\Icons\\orange-uninstall.ico"
+!define MUI_ICON "%s\LLVM.ico"
+!define MUI_UNICON "%s\Contrib\Graphics\Icons\orange-uninstall.ico"
 
 !insertmacro MUI_PAGE_WELCOME
 
@@ -1321,7 +1317,7 @@ InstallDir "C:\\Cling\\cling-${VERSION}"
 
 !insertmacro MUI_PAGE_INSTFILES
 
-!define MUI_FINISHPAGE_RUN "$INSTDIR\\bin\\${MAIN_APP_EXE}"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\bin\${MAIN_APP_EXE}"
 !insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -1362,16 +1358,16 @@ Section "MainFiles"
             path = os.path.join(root, file)
             f.write(' File "%s"\n' % (path))
 
-    template = '''
+    template = r'''
 SectionEnd
 
 Section make_uninstaller
  ; Write the uninstall keys for Windows
  SetOutPath "$INSTDIR"
- WriteRegStr HKLM "Software\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Cling" "DisplayName" "Cling"
- WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Cling" "UninstallString" "$INSTDIR\\uninstall.exe"
- WriteRegDWORD HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Cling" "NoModify" 1
- WriteRegDWORD HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Cling" "NoRepair" 1
+ WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Cling" "DisplayName" "Cling"
+ WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Cling" "UninstallString" "$INSTDIR\uninstall.exe"
+ WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Cling" "NoModify" 1
+ WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Cling" "NoRepair" 1
  WriteUninstaller "uninstall.exe"
 SectionEnd
 
@@ -1379,18 +1375,18 @@ SectionEnd
 # TODO: This is currently hardcoded.
 Section "Shortcuts"
 
- CreateDirectory "$SMPROGRAMS\\Cling"
- CreateShortCut "$SMPROGRAMS\\Cling\\Uninstall.lnk" "$INSTDIR\\uninstall.exe" "" "$INSTDIR\\uninstall.exe" 0
- CreateShortCut "$SMPROGRAMS\Cling\\Cling.lnk" "$INSTDIR\\bin\\cling.exe" "" "${MUI_ICON}" 0
- CreateDirectory "$SMPROGRAMS\\Cling\\Documentation"
- CreateShortCut "$SMPROGRAMS\\Cling\\Documentation\\Cling (PS).lnk" "$INSTDIR\\docs\\llvm\\ps\\cling.ps" "" "" 0
- CreateShortCut "$SMPROGRAMS\\Cling\\Documentation\\Cling (HTML).lnk" "$INSTDIR\\docs\\llvm\\html\\cling\\cling.html" "" "" 0
+ CreateDirectory "$SMPROGRAMS\Cling"
+ CreateShortCut "$SMPROGRAMS\Cling\Uninstall.lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe" 0
+ CreateShortCut "$SMPROGRAMS\Cling\Cling.lnk" "$INSTDIR\bin\cling.exe" "" "${MUI_ICON}" 0
+ CreateDirectory "$SMPROGRAMS\Cling\Documentation"
+ CreateShortCut "$SMPROGRAMS\Cling\Documentation\Cling (PS).lnk" "$INSTDIR\docs\llvm\ps\cling.ps" "" "" 0
+ CreateShortCut "$SMPROGRAMS\Cling\Documentation\Cling (HTML).lnk" "$INSTDIR\docs\llvm\html\cling\cling.html" "" "" 0
 
 SectionEnd
 
 Section "Uninstall"
 
- DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\\Uninstall\Cling"
+ DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Cling"
  DeleteRegKey HKLM "Software\Cling"
 
  ; Remove shortcuts
@@ -1423,7 +1419,7 @@ Section "Uninstall"
     iterate()
 
     # last bit of the uninstaller
-    template = '''
+    template = r'''
 SectionEnd
 
 ; Function to detect Windows version and abort if Cling is unsupported in the current platform
@@ -1469,7 +1465,7 @@ Function CheckPrevVersion
   Push $0
   Push $1
   Push $2
-  IfFileExists "$INSTDIR\\bin\cling.exe" 0 otherver
+  IfFileExists "$INSTDIR\bin\cling.exe" 0 otherver
   MessageBox MB_OK|MB_ICONSTOP "Another Cling installation (with the same version) has been detected. Please uninstall it first."
   Abort
 otherver:
@@ -1574,7 +1570,7 @@ def check_mac(pkg):
 def make_dmg():
     box_draw("Building Apple Disk Image")
     APP_NAME = 'Cling'
-    DMG_BACKGROUND_IMG = 'graphic.png'
+    # DMG_BACKGROUND_IMG = 'graphic.png'  # TODO: use
     APP_EXE = '%s.app/Contents/MacOS/bin/%s' % (APP_NAME, APP_NAME.lower())
     VOL_NAME = "%s-%s" % (APP_NAME.lower(), VERSION)
     DMG_TMP = "%s-temp.dmg" % (VOL_NAME)
