@@ -1676,10 +1676,12 @@ namespace cling {
   Interpreter::executeTransaction(Transaction& T) {
     assert(!isInSyntaxOnlyMode() && "Running on what?");
     assert(T.getState() == Transaction::kCommitted && "Must be committed");
-
     const std::shared_ptr<llvm::Module>& M = T.getModule();
     if (!M)
       return Interpreter::kExeNoModule;
+
+    // This command appears to be dumping LLVM bytecode in a readable format.
+    M->dump();
 
     IncrementalExecutor::ExecutionResult ExeRes
        = IncrementalExecutor::kExeSuccess;

@@ -23,10 +23,33 @@
 #include "llvm/ExecutionEngine/RTDyldMemoryManager.h"
 #include "llvm/Target/TargetMachine.h"
 
+#include <llvm/MC/MCInst.h>
+#include <llvm/MC/MCStreamer.h>
+#include <llvm/MC/MCSubtargetInfo.h>
+#include <llvm/MC/MCObjectFileInfo.h>
+#include <llvm/MC/MCRegisterInfo.h>
+#include <llvm/MC/MCAsmInfo.h>
+#include <llvm/MC/MCAsmBackend.h>
+#include <llvm/MC/MCCodeEmitter.h>
+#include <llvm/MC/MCInstPrinter.h>
+#include <llvm/MC/MCInstrInfo.h>
+#include <llvm/MC/MCContext.h>
+#include <llvm/MC/MCExpr.h>
+#include <llvm/MC/MCInstrAnalysis.h>
+#include <llvm/MC/MCSymbol.h>
+#include <llvm/AsmParser/Parser.h>
+#include <llvm/MC/MCDisassembler/MCDisassembler.h>
+#include <llvm/MC/MCDisassembler/MCExternalSymbolizer.h>
+#include "llvm/Support/TargetRegistry.h"
+#include "clang/Basic/SourceManager.h"
+
+
+
 #include <map>
 #include <memory>
 #include <set>
 #include <string>
+#include <iostream>
 #include <vector>
 
 namespace llvm {
@@ -70,6 +93,68 @@ private:
       //
       // if (auto GDBListener = m_JIT.m_GDBListener)
       //   GDBListener->NotifyObjectEmitted(*Object->getBinary(), Info);
+
+      llvm::outs() << ">>>> OBJECT LOADED NOTIFICATION RECEIVED <<<<\n";
+
+      // std::cout << (*Object->getBinary()) << std::endl;
+      std::string TargetTriple = llvm::sys::getDefaultTargetTriple();
+      llvm::Triple TheTriple = llvm::Triple(TargetTriple);
+      std::string err;
+      const llvm::Target *TheTarget = llvm::TargetRegistry::lookupTarget(TargetTriple, err);
+
+      std::unique_ptr<llvm::MCStreamer> Streamer;
+      llvm::SourceMgr SrcMgr;
+      std::unique_ptr<llvm::MCAsmInfo> MAI(TheTarget->createMCAsmInfo(*TheTarget->createMCRegInfo(TargetTriple), TargetTriple));
+      std::unique_ptr<llvm::MCRegisterInfo> MRI(TheTarget->createMCRegInfo(TargetTriple));
+      assert(MRI && "Unable to create target register info!");
+  
+      std::unique_ptr<llvm::MCObjectFileInfo> MOFI(new llvm::MCObjectFileInfo());
+      llvm::MCContext Ctx(MAI.get(), MRI.get(), MOFI.get(), &SrcMgr);
+      MOFI->InitMCObjectFileInfo(TheTriple, /* PIC */ false, llvm::CodeModel::JITDefault, Ctx);
+
+
+      std::string CPU = "x86-64";
+      std::string features = "";
+
+      std::unique_ptr<llvm::MCSubtargetInfo>
+          STI(TheTarget->createMCSubtargetInfo(TargetTriple, CPU, features));
+      std::unique_ptr<llvm::MCDisassembler> DisAsm(TheTarget->createMCDisassembler(*STI, Ctx));
+      if (!DisAsm) { llvm::outs() << "Error in creating Disassembler?"; }
+
+      unsigned OutputAsmVariant = 0; // ATT or Intel-style assembly
+
+
+      std::unique_ptr<llvm::MCInstrInfo> MCII(TheTarget->createMCInstrInfo());
+      std::unique_ptr<llvm::MCInstrAnalysis> MCIA(TheTarget->createMCInstrAnalysis(MCII.get()));
+      llvm::MCInstPrinter *IP = TheTarget->createMCInstPrinter(TheTriple, OutputAsmVariant, *MAI, *MCII, *MRI);
+
+      llvm::MCCodeEmitter *CE = nullptr;
+      llvm::MCAsmBackend *MAB = nullptr;
+
+      // bool ShowEncoding = false;
+      // if (ShowEncoding) {
+      //     CE = TheTarget->createMCCodeEmitter(*MCII, *MRI, Ctx);
+      //     llvm::MCTargetOptions Options;
+      //     MAB = TheTarget->createMCAsmBackend(*STI, *MRI, Options);
+      // }
+
+      auto ustream = llvm::make_unique<llvm::formatted_raw_ostream>(llvm::outs());
+      Streamer.reset(TheTarget->createAsmStreamer(Ctx, std::move(ustream), /*asmverbose*/ true,
+                                                /*useDwarfDirectory*/ true,
+                                                IP, CE, MAB, /*ShowInst*/ false));
+
+      Streamer->InitSections(true);
+      Streamer->AddComment("Test Comment.");
+
+      // llvm::ArrayRef<uint8_t> memoryObject(const_cast<uint8_t*>((const uint8_t*)*Object->getBinary()), Fsize);
+      // llvm::ArrayRef<uint8_t> memoryObject(Object->getBinary()->getBufferStart(), Object->getBinary()->getBufferSiz(e));
+      // SymbolTable(MCContext &Ctx, const object::ObjectFile *object, int64_t slide, const FuncMCView &MemObj):
+
+      // int slide = 0; // ???
+      // llvm::SymbolTable DisInfo(Ctx, Object, slide, memoryObject);
+
+      std::string buf;
+      Streamer->EmitRawText(buf);
 
       for (const auto &Symbol: Object->getBinary()->symbols()) {
         auto Flags = Symbol.getFlags();
