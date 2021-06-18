@@ -45,57 +45,67 @@ namespace {
       return true;
     }
   };
+}
+
+namespace cling {
 
   ///\brief Delays ~TextInput until after ~StreamReader and ~TerminalDisplay
   ///
-  class TextInputHolder {
+  class UserInterface::TextInputHolder {
     textinput::StreamReader* m_Reader;
     textinput::TerminalDisplay* m_Display;
     textinput::TextInput m_Input;
 
+    class HistoryFile {
+      llvm::SmallString<512> Path;
+
+    public:
+      HistoryFile(const char* Env = "CLING_NOHISTORY",
+                  const char* Name = ".cling_history") {
+        if (getenv(Env)) return;
+        // History file is $HOME/.cling_history
+        if (llvm::sys::path::home_directory(Path))
+          llvm::sys::path::append(Path, Name);
+      }
+      const char* c_str() { return Path.empty() ? nullptr : Path.c_str(); }
+    };
+
   public:
-    TextInputHolder(llvm::SmallString<512>& Hist)
+    TextInputHolder(HistoryFile HistFile = HistoryFile())
         : m_Reader(textinput::StreamReader::Create()),
           m_Display(textinput::TerminalDisplay::Create()),
-          m_Input(*m_Reader, *m_Display, Hist.empty() ? 0 : Hist.c_str()) {}
+          m_Input(*m_Reader, *m_Display, HistFile.c_str()) {
+    }
 
     ~TextInputHolder() {
       delete m_Reader;
       delete m_Display;
     }
 
-    textinput::TextInput* operator -> () { return &m_Input; }
+    operator textinput::TextInput& () { return m_Input; }
   };
-}
 
-namespace cling {
-
-  UserInterface::UserInterface(Interpreter& interp) {
-    m_MetaProcessor.reset(new MetaProcessor(interp, cling::outs()));
+  UserInterface::UserInterface() {
     llvm::install_fatal_error_handler(&CompilationException::throwingHandler);
   }
 
-  UserInterface::~UserInterface() {}
+  UserInterface::~UserInterface() { llvm::remove_fatal_error_handler(); }
+
+  void UserInterface::attach(Interpreter& Interp) {
+    m_MetaProcessor.reset(new MetaProcessor(Interp, cling::outs()));
+  }
 
   void UserInterface::runInteractively(bool nologo /* = false */) {
-    if (!nologo) {
+    assert(m_MetaProcessor.get() && "Not attached to an Interpreter.");
+    if (!nologo)
       PrintLogo();
-    }
 
-    llvm::SmallString<512> histfilePath;
-    if (!getenv("CLING_NOHISTORY")) {
-      // History file is $HOME/.cling_history
-      if (llvm::sys::path::home_directory(histfilePath))
-        llvm::sys::path::append(histfilePath, ".cling_history");
-    }
-
-    TextInputHolder TI(histfilePath);
+    m_TextInput.reset(new TextInputHolder);
+    textinput::TextInput& TI = *m_TextInput;
 
     // Inform text input about the code complete consumer
     // TextInput owns the TabCompletion.
-    UITabCompletion* Completion =
-                      new UITabCompletion(m_MetaProcessor->getInterpreter());
-    TI->SetCompletion(Completion);
+    TI.SetCompletion(new UITabCompletion(m_MetaProcessor->getInterpreter()));
 
     bool Done = false;
     std::string Line;
@@ -106,9 +116,9 @@ namespace cling {
         m_MetaProcessor->getOuts().flush();
         {
           MetaProcessor::MaybeRedirectOutputRAII RAII(*m_MetaProcessor);
-          TI->SetPrompt(Prompt.c_str());
-          Done = TI->ReadInput() == textinput::TextInput::kRREOF;
-          TI->TakeInput(Line);
+          TI.SetPrompt(Prompt.c_str());
+          Done = TI.ReadInput() == textinput::TextInput::kRREOF;
+          TI.TakeInput(Line);
           if (Done && Line.empty())
             break;
         }

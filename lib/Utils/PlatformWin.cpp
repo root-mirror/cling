@@ -859,11 +859,17 @@ void RegisterEHFrames(uintptr_t ImgBs, const EHFrameInfos& Frames, bool Block) {
 void DeRegisterEHFrames(uintptr_t ImgBase, const EHFrameInfos& Frames) {
   if (Frames.empty())
     return;
-  assert(getImageBaseMap().find(ImgBase) != getImageBaseMap().end());
+
+  // There is a chance that DeRegisterEHFrames will have been called without a
+  // preceeding call to RegisterEHFrames.  Rather than tracking such cases,
+  // just ignore the requests when ImgBase was never registered.
+  ImageBaseMap& Unwind = getImageBaseMap();
+  auto Itr = Unwind.find(ImgBase);
+  if (Itr == Unwind.end())
+    return;
 
   // Remove the ImageBase from lookup
-  ImageBaseMap& Unwind = getImageBaseMap();
-  Unwind.erase(Unwind.find(ImgBase));
+  Unwind.erase(Itr);
 
   // Unregister all the PRUNTIME_FUNCTIONs
   for (auto&& Frame : Frames)

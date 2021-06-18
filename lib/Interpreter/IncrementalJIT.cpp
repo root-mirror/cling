@@ -260,12 +260,11 @@ public:
     // the fact that we're lazily emitting object files: The only way you can
     // get more than one set of objects loaded but not yet finalized is if
     // they were loaded during relocation of another set.
-    if (m_jit.m_UnfinalizedSections.size() == 1) {
 #ifdef CLING_WIN_SEH_EXCEPTIONS
-      platform::RegisterEHFrames(getBaseAddr(), m_EHFrames, true);
+    platform::RegisterEHFrames(getBaseAddr(), m_EHFrames, true);
 #endif
+    if (m_jit.m_UnfinalizedSections.size() == 1)
       return getExeMM()->finalizeMemory(ErrMsg);
-    }
     return false;
   };
 
