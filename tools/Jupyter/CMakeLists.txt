@@ -39,6 +39,10 @@ else()
    endif()
 endif()
 
+set( LLVM_LINK_COMPONENTS
+  binaryformat
+)
+
 set(LIBS
         clangAST
         clangBasic

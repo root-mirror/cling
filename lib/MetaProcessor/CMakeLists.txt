@@ -7,6 +7,7 @@
 #------------------------------------------------------------------------------
 
 set( LLVM_LINK_COMPONENTS
+  binaryformat
   core
   support
   binaryformat

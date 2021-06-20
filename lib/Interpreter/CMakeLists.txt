@@ -25,6 +25,7 @@ set(LIBS
 
 set(LLVM_LINK_COMPONENTS
   analysis
+  binaryformat
   core
   coroutines
   coverage
