@@ -511,9 +511,12 @@ namespace cling {
 #else
     const char* Spec = "__clrcall";
 #endif
+    const bool ParamNames = LangOpts.C99;
     Strm << Linkage << " " << Spec << " int (*__dllonexit("
-         << "int (" << Spec << " *f)(void**, void**), void**, void**))"
-         "(void**, void**)";
+         << "int (" << Spec << " *f)(void**, void**),"
+         << "void**" << (ParamNames ? " a" : "") << ","
+         << "void**" << (ParamNames ? " b" : "")
+         << "))(void**, void**)";
       if (EmitDefinitions)
         Strm << " { __cxa_atexit((void(*)(void*))f, 0, __dso_handle);"
                 " return f; }\n";
