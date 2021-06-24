@@ -29,8 +29,16 @@
 <h3>Install </h3>
 To install the kernel with sources in src/tools/cling:
 <pre><code>
-    export PATH=/path/to/cling/bin:$PATH
+    CLING_PATH=/path/to/cling
+    export PATH=${CLING_PATH}/bin/:$PATH
+    export LIBRARY_PATH=${CLING_PATH}/lib/:$LIBRARY_PATH
+    export CPATH=${CLING_PATH}/include/:$CPATH
+    export LD_LIBRARY_PATH=${CLING_PATH}/lib/:$LD_LIBRARY_PATH
+    
+    # from source code:
     cd src/tools/cling/tools/Jupyter/kernel/
+    # from precompiled binaries: 
+    cd share/cling/Jupyter/
 
     pip install -e .
     # or: pip3 install -e .
