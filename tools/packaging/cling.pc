@@ -1,0 +1,10 @@
+prefix=/opt/cling
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: cling
+Description: Interactive C++ interpreter
+Version: 0.4~dev
+Libs: -L${libdir} -lcling -lclingInterpreter -lclingMetaProcessor -lclingUserInterface -lclingUtils
+Cflags: -I${includedir} -I${includedir}/cling/UserInterface -fno-rtti
