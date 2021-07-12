@@ -106,6 +106,17 @@ int main( int argc, char **argv ) {
     Interp.loadFile(Lib);
 
   cling::UserInterface Ui(Interp);
+
+  // Look for .cling_init in the home directory and if found process it like a cling script
+  llvm::SmallString<128> ClingInit;
+  llvm::sys::path::home_directory(ClingInit);
+
+  llvm::sys::path::append(ClingInit, ".cling_init");
+
+  if(llvm::sys::fs::exists(ClingInit)) {
+    Ui.getMetaProcessor()->readInputFromFile(ClingInit.c_str(), nullptr, -1, true);
+  }
+
   // If we are not interactive we're supposed to parse files
   if (!Opts.IsInteractive()) {
     for (const std::string &Input : Opts.Inputs) {
