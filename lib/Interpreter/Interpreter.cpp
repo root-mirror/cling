@@ -825,6 +825,8 @@ namespace cling {
     CO.ResultEvaluation = (bool)V;
     // CO.IgnorePromptDiags = 1; done by EvaluateInternal().
     CO.CheckPointerValidity = 1;
+    if(wrapReadySource.rfind("__constant__", 0) != -1)
+      wrapPoint = wrapReadySource.size();
     if (EvaluateInternal(wrapReadySource, CO, V, T, wrapPoint)
                                                      == Interpreter::kFailure) {
       return Interpreter::kFailure;
