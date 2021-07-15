@@ -105,7 +105,7 @@ class ClingKernel(Kernel):
             raise RuntimeError('Cannot find cling in $PATH. No cling, no fun.')
 
         try:
-            whichCling = os.readlink(clingInPath)
+            whichCling = os.path.realpath(clingInPath)
             whichCling = os.path.join(os.path.dirname(clingInPath), whichCling)
         except OSError as e:
             #If cling is not a symlink try a regular file
